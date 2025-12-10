@@ -236,10 +236,29 @@
 
     <div class="card">
       <div class="sidebar-section-title">Добавление точек</div>
-      <div class="hint">
-        Отправьте боту геолокацию — точка появится на карте.<br>
-        Бот: <b>@memorymap_bot</b><br>
-        Точки будут привязаны к вашему Telegram ID.
+      <div class="hint" style="margin-bottom:8px;">
+        Чтобы добавить точку с веб-карты, нажмите <b>правой кнопкой мыши</b> по карте — появится временный жёлтый пин.
+      </div>
+
+      <div class="field-label">Название</div>
+      <input id="web-title" class="input" placeholder="Можно оставить пустым" />
+
+      <div class="field-label" style="margin-top:6px;">Описание</div>
+      <textarea id="web-note" class="input" rows="3" style="resize:vertical;"></textarea>
+
+      <div class="field-label" style="margin-top:6px;">Координаты временной точки</div>
+      <input id="web-coords" class="input" placeholder="ПКМ по карте" readonly />
+
+      <button class="btn btn-primary" style="margin-top:8px;" onclick="addWebPoint()">
+        Добавить точку
+      </button>
+
+      <div id="web-add-status" class="hint" style="margin-top:6px;">
+        Выберите место на карте правой кнопкой мыши.
+      </div>
+
+      <div class="hint" style="margin-top:8px;">
+        Также можно добавить точку, отправив геолокацию боту <b>@memorymap_bot</b>.
       </div>
     </div>
   </aside>
@@ -269,8 +288,11 @@
   let currentUserId = null;      // Telegram ID
   let currentMarkers = [];       // ссылки на Marker, чтобы их удалять
 
-  function createPin(isMine) {
-    const color = isMine ? "#10b981" : "#3b82f6"; // зелёный свои, синий чужие
+  let tempMarker = null; // временный жёлтый маркер
+  let tempCoords = null; // { lng, lat } последнего ПКМ
+
+  function createPin(isMine, overrideColor) {
+    const color = overrideColor || (isMine ? "#10b981" : "#3b82f6"); // зелёный свои, синий чужие
 
     const svg = `
       <svg width="20" height="35" viewBox="0 0 26 40" xmlns="http://www.w3.org/2000/svg">
@@ -311,6 +333,80 @@
       "Вы авторизованы как Telegram ID " + currentUserId +
       ". Точки, добавленные через бота, воспринимаются как ваши.";
     refresh();
+  }
+
+  async function addWebPoint() {
+    const statusEl = document.getElementById("web-add-status");
+
+    if (!tempCoords) {
+      if (statusEl) {
+        statusEl.innerText = "Сначала выберите точку: нажмите правой кнопкой мыши по карте.";
+      }
+      return;
+    }
+
+    if (!currentUserId) {
+      if (statusEl) {
+        statusEl.innerText = "Нужно авторизоваться: введите Telegram ID и нажмите «Войти».";
+      }
+      return;
+    }
+
+    const titleInput = document.getElementById("web-title");
+    const noteInput = document.getElementById("web-note");
+
+    const title = titleInput ? titleInput.value.trim() : "";
+    const note = noteInput ? noteInput.value.trim() : "";
+
+    const body = {
+      group_id: 1, // как и для бота — публичная группа
+      tg_id: Number(currentUserId),
+      username: null,
+      title: title || null,
+      note: note,
+      lat: tempCoords.lat,
+      lon: tempCoords.lng,
+    };
+
+    try {
+      const resp = await fetch(`${API_BASE}/v1/places`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!resp.ok) {
+        if (statusEl) {
+          statusEl.innerText = "Не удалось добавить точку (код " + resp.status + ").";
+        }
+        return;
+      }
+
+      // успех
+      if (statusEl) {
+        statusEl.innerText = "Точка добавлена.";
+      }
+
+      // очищаем форму и временный пин
+      if (titleInput) titleInput.value = "";
+      if (noteInput) noteInput.value = "";
+      const coordsInput = document.getElementById("web-coords");
+      if (coordsInput) coordsInput.value = "";
+
+      if (tempMarker) {
+        tempMarker.remove();
+        tempMarker = null;
+      }
+      tempCoords = null;
+
+      // обновляем маркеры
+      refresh();
+    } catch (err) {
+      console.error(err);
+      if (statusEl) {
+        statusEl.innerText = "Ошибка соединения с API при добавлении точки.";
+      }
+    }
   }
 
   function fakeLogout() {
@@ -358,6 +454,13 @@
 
   map.addControl(new maplibregl.NavigationControl(), "top-right");
 
+  map.on("contextmenu", (e) => {
+    if (e.originalEvent && e.originalEvent.preventDefault) {
+      e.originalEvent.preventDefault(); // убираем контекстное меню браузера
+    }
+    setTempMarker(e.lngLat);
+  });
+
   function clearMarkers() {
     currentMarkers.forEach(m => m.remove());
     currentMarkers = [];
@@ -371,6 +474,35 @@
     const el = document.getElementById("status-text");
     el.innerText = text;
     el.style.color = isError ? "#dc2626" : "#16a34a";
+  }
+
+  function setTempMarker(lngLat) {
+    tempCoords = { lng: lngLat.lng, lat: lngLat.lat };
+
+    // обновляем поле координат
+    const coordsInput = document.getElementById("web-coords");
+    if (coordsInput) {
+      coordsInput.value =
+        tempCoords.lat.toFixed(5) + ", " + tempCoords.lng.toFixed(5);
+    }
+
+    // убираем старый временный маркер, если был
+    if (tempMarker) {
+      tempMarker.remove();
+      tempMarker = null;
+    }
+
+    // жёлтый пин
+    const el = createPin(false, "#facc15"); // жёлтый цвет
+
+    tempMarker = new maplibregl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([tempCoords.lng, tempCoords.lat])
+      .addTo(map);
+
+    const status = document.getElementById("web-add-status");
+    if (status) {
+      status.innerText = "Временная точка выбрана. Заполните поля и нажмите «Добавить точку».";
+    }
   }
 
   async function refresh() {
@@ -437,9 +569,14 @@
         ? "Моя точка"
         : (p.username ? ("@" + p.username) : (p.user_tg_id ? "Пользователь " + p.user_tg_id : "Аноним"));
 
-      const popupHtml = `<b>${p.title || "Без названия"}</b><br>
-    ${p.note || ""}<br>
-    <span style="font-size:11px;color:#6b7280;">${who}</span>`;
+      const displayTitle =
+        p.title && p.title.trim()
+          ? p.title
+          : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
+
+      const popupHtml = `<b>${displayTitle}</b><br>
+      ${p.note || ""}<br>
+      <span style="font-size:11px;color:#6b7280;">${who}</span>`;
 
       const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
         .setLngLat([p.lon, p.lat])
