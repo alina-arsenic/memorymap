@@ -182,6 +182,27 @@
       color: #374151;
     }
 
+    .mm-marker {
+      position: relative;
+      width: 18px;
+      height: 18px;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      cursor: pointer;
+    }
+
+    /* белая точка внутри */
+    .mm-marker::after {
+      content: "";
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ffffff;
+      top: 4px;
+      left: 4px;
+    }
+
     @media (max-width: 800px) {
       .app {
         grid-template-columns: 1fr;
@@ -417,18 +438,16 @@
     filtered.forEach(p => {
       const el = document.createElement("div");
       el.className = "mm-marker";
-      el.style.width = "12px";
-      el.style.height = "12px";
-      el.style.borderRadius = "50%";
 
       if (p.isMine) {
-        el.style.background = "#10b981"; // зеленые для моих
-        el.style.boxShadow = "0 0 0 2px rgba(16,185,129,0.5)";
+        // свои — зелёные
+        el.style.background = "#10b981";
+        el.style.boxShadow = "0 0 0 2px rgba(16,185,129,0.4)";
       } else {
-        el.style.background = "#ef4444"; // красные для остальных
-        el.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.35)";
+        // чужие — синие
+        el.style.background = "#3b82f6";
+        el.style.boxShadow = "0 0 0 2px rgba(59,130,246,0.4)";
       }
-
       const who =
         p.isMine
           ? "Моя точка"
@@ -440,7 +459,7 @@
         <span style="font-size:11px;color:#6b7280;">${who}</span>
       `;
 
-      const marker = new maplibregl.Marker(el)
+      const marker = new maplibregl.Marker({ element: el })
         .setLngLat([p.lon, p.lat])
         .setPopup(new maplibregl.Popup().setHTML(popupHtml))
         .addTo(map);
