@@ -182,27 +182,6 @@
       color: #374151;
     }
 
-    .mm-marker {
-      position: relative;
-      width: 18px;
-      height: 18px;
-      border-radius: 50% 50% 50% 0;
-      transform: rotate(-45deg);
-      cursor: pointer;
-    }
-
-    /* белая точка внутри */
-    .mm-marker::after {
-      content: "";
-      position: absolute;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #ffffff;
-      top: 4px;
-      left: 4px;
-    }
-
     @media (max-width: 800px) {
       .app {
         grid-template-columns: 1fr;
@@ -289,6 +268,22 @@
 
   let currentUserId = null;      // Telegram ID
   let currentMarkers = [];       // ссылки на Marker, чтобы их удалять
+
+  function createPin(isMine) {
+    const color = isMine ? "#10b981" : "#3b82f6"; // зелёный свои, синий чужие
+
+    const svg = `
+      <svg width="20" height="35" viewBox="0 0 26 40" xmlns="http://www.w3.org/2000/svg">
+        <path d="M13 0C6 0 0.5 5.5 0.5 12.5C0.5 23 13 40 13 40C13 40 25.5 23 25.5 12.5C25.5 5.5 20 0 13 0Z"
+              fill="${color}" stroke="white" stroke-width="2" />
+        <circle cx="13" cy="12" r="5" fill="white" />
+      </svg>
+    `;
+
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = svg.trim();
+    return wrapper.firstChild; // сам <svg>
+  }
 
   function initUserFromStorage() {
     const saved = localStorage.getItem(LS_KEY);
@@ -436,30 +431,17 @@
     clearMarkers();
 
     filtered.forEach(p => {
-      const el = document.createElement("div");
-      el.className = "mm-marker";
+      const el = createPin(p.isMine);
 
-      if (p.isMine) {
-        // свои — зелёные
-        el.style.background = "#10b981";
-        el.style.boxShadow = "0 0 0 2px rgba(16,185,129,0.4)";
-      } else {
-        // чужие — синие
-        el.style.background = "#3b82f6";
-        el.style.boxShadow = "0 0 0 2px rgba(59,130,246,0.4)";
-      }
-      const who =
-        p.isMine
-          ? "Моя точка"
-          : (p.username ? ("@" + p.username) : (p.user_tg_id ? "Пользователь " + p.user_tg_id : "Аноним"));
+      const who = p.isMine
+        ? "Моя точка"
+        : (p.username ? ("@" + p.username) : (p.user_tg_id ? "Пользователь " + p.user_tg_id : "Аноним"));
 
-      const popupHtml = `
-        <b>${p.title || "Без названия"}</b><br>
-        ${p.note || ""}<br>
-        <span style="font-size:11px;color:#6b7280;">${who}</span>
-      `;
+      const popupHtml = `<b>${p.title || "Без названия"}</b><br>
+    ${p.note || ""}<br>
+    <span style="font-size:11px;color:#6b7280;">${who}</span>`;
 
-      const marker = new maplibregl.Marker({ element: el })
+      const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
         .setLngLat([p.lon, p.lat])
         .setPopup(new maplibregl.Popup().setHTML(popupHtml))
         .addTo(map);
