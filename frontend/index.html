@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MemoryMap</title>
+
+  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #111827;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      height: 100vh;
+      background: #f3f4f6;
+    }
+
+    .sidebar {
+      background: #ffffff;
+      border-right: 1px solid #e5e7eb;
+      padding: 16px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .sidebar-section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: #6b7280;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+
+    .sidebar h1 {
+      font-size: 18px;
+      margin: 0 0 4px 0;
+    }
+
+    .sidebar .subtitle {
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    .card {
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      padding: 10px 10px;
+      background: #f9fafb;
+    }
+
+    .field-label {
+      font-size: 13px;
+      margin-bottom: 4px;
+      color: #374151;
+    }
+
+    .input {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 10px;
+      border-radius: 9999px;
+      border: 1px solid #d1d5db;
+      background: #f3f4f6;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.1s, box-shadow 0.1s, transform 0.05s;
+    }
+    .btn-primary {
+      background: #4f46e5;
+      border-color: #4f46e5;
+      color: white;
+    }
+    .btn:hover {
+      background: #e5e7eb;
+    }
+    .btn-primary:hover {
+      background: #4338ca;
+    }
+    .btn:active {
+      transform: translateY(1px);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .layers-list label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    .layers-list input[type="checkbox"] {
+      margin: 0;
+    }
+    .hint {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+
+    .map-wrapper {
+      position: relative;
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+
+    .map-topbar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+      backdrop-filter: blur(8px);
+      pointer-events: none;
+    }
+    .map-topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      pointer-events: auto;
+    }
+    .map-topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 9999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25);
+    }
+    .status-text {
+      font-size: 12px;
+      color: #16a34a;
+    }
+
+    .map-counter {
+      font-size: 12px;
+      color: #374151;
+    }
+
+    @media (max-width: 800px) {
+      .app {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+      }
+      .sidebar {
+        border-right: none;
+        border-bottom: 1px solid #e5e7eb;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div>
+      <h1>MemoryMap</h1>
+      <div class="subtitle">
+        Личная и групповая карта значимых мест
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sidebar-section-title">Пользователь</div>
+      <div class="field-label">Telegram ID</div>
+      <input id="user-id-input" class="input" placeholder="узнать через /whoami в боте" />
+      <div style="margin-top:6px; display:flex; gap:6px;">
+        <button class="btn btn-primary" onclick="fakeLogin()">Войти</button>
+        <button class="btn" onclick="fakeLogout()">Выйти</button>
+      </div>
+      <div id="user-info" class="hint" style="margin-top:6px;">
+        Не авторизованы
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sidebar-section-title">Слои</div>
+      <div class="layers-list">
+        <label>
+          <input type="checkbox" id="layer-public" checked onchange="onLayerChange()">
+          <span>Публичные точки (общая карта)</span>
+        </label>
+        <label>
+          <input type="checkbox" id="layer-my" checked onchange="onLayerChange()">
+          <span>Мои точки (по Telegram ID)</span>
+        </label>
+      </div>
+      <div class="hint">
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sidebar-section-title">Добавление точек</div>
+      <div class="hint">
+        Отправьте боту геолокацию — точка появится на карте.<br>
+        Бот: <b>@memorymap_bot</b><br>
+        Точки будут привязаны к вашему Telegram ID.
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAP -->
+  <main class="map-wrapper">
+    <div id="map"></div>
+
+    <div class="map-topbar">
+      <div class="map-topbar-left">
+        <div class="status-dot"></div>
+        <div class="status-text" id="status-text">Подключено к API</div>
+      </div>
+      <div class="map-topbar-right">
+        <span class="map-counter" id="points-counter">Точек: 0</span>
+        <button class="btn" onclick="refresh()">Обновить</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+<script>
+  const API_BASE = ""; // тот же origin (http://localhost:8000)
+  const LS_KEY = "mm_user_tg_id";
+
+  let currentUserId = null;      // Telegram ID
+  let currentMarkers = [];       // ссылки на Marker, чтобы их удалять
+
+  function initUserFromStorage() {
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) {
+      currentUserId = saved;
+      const input = document.getElementById("user-id-input");
+      const info = document.getElementById("user-info");
+      if (input) input.value = saved;
+      if (info) {
+        info.innerText =
+          "Вы авторизованы как Telegram ID " + currentUserId;
+      }
+    }
+  }
+
+  function fakeLogin() {
+    const v = document.getElementById("user-id-input").value.trim();
+    if (!v) {
+      alert("Введи свой Telegram ID (узнать через /whoami в боте).");
+      return;
+    }
+    currentUserId = v;
+    localStorage.setItem(LS_KEY, currentUserId);
+    document.getElementById("user-info").innerText =
+      "Вы авторизованы как Telegram ID " + currentUserId +
+      ". Точки, добавленные через бота, воспринимаются как ваши.";
+    refresh();
+  }
+
+  function fakeLogout() {
+    currentUserId = null;
+    localStorage.removeItem(LS_KEY);
+    document.getElementById("user-id-input").value = "";
+    document.getElementById("user-info").innerText =
+      "Не авторизованы";
+    refresh();
+  }
+
+  function onLayerChange() {
+    refresh();
+  }
+
+  const map = new maplibregl.Map({
+    container: "map",
+    style: {
+      version: 8,
+      sources: {
+        "osm-tiles": {
+          type: "raster",
+          tiles: [
+            "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          ],
+          tileSize: 256,
+          attribution: "© OpenStreetMap contributors"
+        }
+      },
+      layers: [
+        {
+          id: "osm-tiles",
+          type: "raster",
+          source: "osm-tiles",
+          minzoom: 0,
+          maxzoom: 19
+        }
+      ]
+    },
+    center: [37.6176, 55.7558],
+    zoom: 10
+  });
+
+  map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+  function clearMarkers() {
+    currentMarkers.forEach(m => m.remove());
+    currentMarkers = [];
+  }
+
+  function updateCounter(n) {
+    document.getElementById("points-counter").innerText = "Точек: " + n;
+  }
+
+  function setStatus(text, isError) {
+    const el = document.getElementById("status-text");
+    el.innerText = text;
+    el.style.color = isError ? "#dc2626" : "#16a34a";
+  }
+
+  async function refresh() {
+    const showPublic = document.getElementById("layer-public").checked;
+    const showMy = document.getElementById("layer-my").checked;
+
+    if (!showPublic && !showMy) {
+      clearMarkers();
+      updateCounter(0);
+      return;
+    }
+
+    const bounds = map.getBounds();
+    const bbox = [
+      bounds.getWest(),
+      bounds.getSouth(),
+      bounds.getEast(),
+      bounds.getNorth()
+    ].join(",");
+
+    let response;
+    try {
+      // все точки физически лежат в группе 1 (публичная группа)
+      response = await fetch(`${API_BASE}/v1/places?group_id=1&bbox=${bbox}`);
+    } catch (e) {
+      console.error(e);
+      setStatus("Ошибка соединения с API", true);
+      return;
+    }
+
+    if (!response.ok) {
+      console.error("Bad status:", response.status);
+      setStatus("Ошибка API: " + response.status, true);
+      return;
+    }
+
+    const data = await response.json();
+    const items = data.items || [];
+
+    const myId = currentUserId ? String(currentUserId) : null;
+    const filtered = [];
+
+    for (const p of items) {
+      const ownerTg = p.user_tg_id != null ? String(p.user_tg_id) : null;
+      const isMine = myId && ownerTg && ownerTg === myId;
+
+      if (showPublic && showMy) {
+        filtered.push({ ...p, isMine });
+      } else if (showMy && !showPublic) {
+        if (isMine) {
+          filtered.push({ ...p, isMine: true });
+        }
+      } else if (showPublic && !showMy) {
+        filtered.push({ ...p, isMine });
+      }
+    }
+
+    clearMarkers();
+
+    filtered.forEach(p => {
+      const el = document.createElement("div");
+      el.className = "mm-marker";
+      el.style.width = "12px";
+      el.style.height = "12px";
+      el.style.borderRadius = "50%";
+
+      if (p.isMine) {
+        el.style.background = "#10b981"; // зеленые для моих
+        el.style.boxShadow = "0 0 0 2px rgba(16,185,129,0.5)";
+      } else {
+        el.style.background = "#ef4444"; // красные для остальных
+        el.style.boxShadow = "0 0 0 2px rgba(239,68,68,0.35)";
+      }
+
+      const who =
+        p.isMine
+          ? "Моя точка"
+          : (p.username ? ("@" + p.username) : (p.user_tg_id ? "Пользователь " + p.user_tg_id : "Аноним"));
+
+      const popupHtml = `
+        <b>${p.title || "Без названия"}</b><br>
+        ${p.note || ""}<br>
+        <span style="font-size:11px;color:#6b7280;">${who}</span>
+      `;
+
+      const marker = new maplibregl.Marker(el)
+        .setLngLat([p.lon, p.lat])
+        .setPopup(new maplibregl.Popup().setHTML(popupHtml))
+        .addTo(map);
+
+      currentMarkers.push(marker);
+    });
+
+    updateCounter(filtered.length);
+    setStatus("Подключено к API", false);
+  }
+
+  initUserFromStorage();
+  map.on("load", refresh);
+  map.on("moveend", refresh);
+</script>
+</body>
+</html>
