@@ -247,7 +247,9 @@
       <textarea id="web-note" class="input" rows="3" style="resize:vertical;"></textarea>
 
       <div class="field-label" style="margin-top:6px;">Координаты временной точки</div>
-      <input id="web-coords" class="input" placeholder="ПКМ по карте" readonly />
+      <div id="web-coords" class="hint">
+        ПКМ по карте, чтобы выбрать точку.
+      </div>
 
       <button class="btn btn-primary" style="margin-top:8px;" onclick="addWebPoint()">
         Добавить точку
@@ -341,6 +343,8 @@
     if (!tempCoords) {
       if (statusEl) {
         statusEl.innerText = "Сначала выберите точку: нажмите правой кнопкой мыши по карте.";
+        statusEl.style.color = "#52525b";
+        statusEl.style.fontWeight = "400";
       }
       return;
     }
@@ -378,6 +382,8 @@
       if (!resp.ok) {
         if (statusEl) {
           statusEl.innerText = "Не удалось добавить точку (код " + resp.status + ").";
+          statusEl.style.color = "#b91c1c";
+          statusEl.style.fontWeight = "600";
         }
         return;
       }
@@ -385,13 +391,17 @@
       // успех
       if (statusEl) {
         statusEl.innerText = "Точка добавлена.";
+        statusEl.style.color = "#16a34a";
+        statusEl.style.fontWeight = "600";
       }
 
       // очищаем форму и временный пин
       if (titleInput) titleInput.value = "";
       if (noteInput) noteInput.value = "";
-      const coordsInput = document.getElementById("web-coords");
-      if (coordsInput) coordsInput.value = "";
+      const coordsEl = document.getElementById("web-coords");
+      if (coordsEl) {
+        coordsEl.textContent = "ПКМ по карте, чтобы выбрать точку.";
+      }
 
       if (tempMarker) {
         tempMarker.remove();
@@ -479,10 +489,10 @@
   function setTempMarker(lngLat) {
     tempCoords = { lng: lngLat.lng, lat: lngLat.lat };
 
-    // обновляем поле координат
-    const coordsInput = document.getElementById("web-coords");
-    if (coordsInput) {
-      coordsInput.value =
+    // обновляем текст с координатами
+    const coordsEl = document.getElementById("web-coords");
+    if (coordsEl) {
+      coordsEl.textContent =
         tempCoords.lat.toFixed(5) + ", " + tempCoords.lng.toFixed(5);
     }
 
@@ -574,9 +584,17 @@
           ? p.title
           : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
 
+      let deleteButtonHtml = "";
+      if (p.isMine) {
+        deleteButtonHtml = `<br><button class="mm-delete-btn" data-id="${p.id}" style="margin-top:4px;font-size:12px;padding:4px 8px;border-radius:9999px;border:1px solid #dc2626;background:#fee2e2;color:#b91c1c;cursor:pointer;">
+          Удалить точку
+        </button>`;
+      }
+
       const popupHtml = `<b>${displayTitle}</b><br>
       ${p.note || ""}<br>
-      <span style="font-size:11px;color:#6b7280;">${who}</span>`;
+      <span style="font-size:11px;color:#6b7280;">${who}</span>
+      ${deleteButtonHtml}`;
 
       const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
         .setLngLat([p.lon, p.lat])
@@ -589,6 +607,52 @@
     updateCounter(filtered.length);
     setStatus("Подключено к API", false);
   }
+
+  document.addEventListener("click", async (e) => {
+    const btn = e.target;
+    if (!btn.classList.contains("mm-delete-btn")) return;
+
+    const id = btn.getAttribute("data-id");
+    if (!id) return;
+
+    // подтверждение
+    const confirmDelete = confirm("Удалить эту точку?");
+    if (!confirmDelete) return;
+
+    if (!currentUserId) {
+      alert("Нужно авторизоваться, чтобы удалять свои точки.");
+      return;
+    }
+
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Удаление...";
+
+    try {
+      const resp = await fetch(`${API_BASE}/v1/places/${id}`, {
+        method: "DELETE",
+        headers: {
+          "X-User-Tg": currentUserId, // для get_current_user на backend
+        },
+      });
+
+      if (!resp.ok) {
+        console.error("Delete failed", resp.status);
+        alert("Не удалось удалить точку (код " + resp.status + ").");
+        btn.disabled = false;
+        btn.textContent = originalText;
+        return;
+      }
+
+      // обновляем карту
+      refresh();
+    } catch (err) {
+      console.error(err);
+      alert("Ошибка соединения при удалении точки.");
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
 
   initUserFromStorage();
   map.on("load", refresh);

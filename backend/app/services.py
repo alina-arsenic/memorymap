@@ -3,6 +3,7 @@ from .db import SessionLocal
 from .models import User, Place
 import uuid
 from typing import Optional, List, Dict
+from sqlalchemy import text
 
 
 class UserService:
@@ -169,3 +170,15 @@ class PlaceService:
             return items
         finally:
             db.close()
+    
+    @staticmethod
+    def delete_place(db: Session, place_id: int, user: User) -> bool:
+        """Удаляет точку, если она принадлежит пользователю. Возвращает True/False."""
+        place = db.query(Place).filter(Place.id == place_id).one_or_none()
+        if not place:
+            return False
+        if place.user_id != user.id:
+            return False
+        db.delete(place)
+        db.commit()
+        return True

@@ -8,6 +8,7 @@ from .auth import get_current_user
 from .db import SessionLocal
 from .models import User
 import uuid
+from fastapi import FastAPI, Query, Depends, HTTPException
 
 
 app = FastAPI(title="MemoryMap API")
@@ -151,6 +152,22 @@ def create_place(p: PlaceCreate):
 def list_places(group_id: int, bbox: str):
     items = PlaceService.list_places(group_id=group_id, bbox=bbox)
     return {"items": items}
+
+
+@app.delete("/v1/places/{place_id}")
+def delete_place(place_id: int, current_user: User = Depends(get_current_user)):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    db = SessionLocal()
+    try:
+        ok = PlaceService.delete_place(db, place_id, current_user)
+        if not ok:
+            # либо точка не найдена, либо не твоя
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return {"status": "ok"}
+    finally:
+        db.close()
 
 
 # ---------- Static frontend ----------
