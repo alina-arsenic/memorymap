@@ -128,13 +128,11 @@ class PlaceCreate(BaseModel):
     note: Optional[str] = None
     lat: float
     lon: float
+    media_keys: List[str] = []
 
 
 @app.post("/v1/places")
 def create_place(p: PlaceCreate):
-    """
-    Принимает HTTP-запрос, валидирует данные и делегирует PlaceService.
-    """
     pid = PlaceService.create_place(
         group_id=p.group_id,
         user_id=p.user_id,
@@ -144,6 +142,7 @@ def create_place(p: PlaceCreate):
         note=p.note,
         lat=p.lat,
         lon=p.lon,
+        media_keys=p.media_keys,
     )
     return {"id": pid}
 

@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
 from .db import SessionLocal
-from .models import User, Place
+from .models import User, Place, Media
 import uuid
 from typing import Optional, List, Dict
 from sqlalchemy import text
-
+from .storage import presign_get
 
 class UserService:
     @staticmethod
@@ -116,6 +116,7 @@ class PlaceService:
         note: Optional[str],
         lat: float,
         lon: float,
+        media_keys: Optional[List[str]] = None,
     ) -> int:
         db = SessionLocal()
         try:
@@ -132,6 +133,21 @@ class PlaceService:
             db.add(place)
             db.commit()
             db.refresh(place)
+
+            # медиа к точке
+            for key in (media_keys or []):
+                m = Media(
+                    place_id=place.id,
+                    user_id=uid,
+                    s3_key=key,
+                    mime="image/jpeg",  # пока считаем, что только фото
+                    status="ready",
+                )
+                db.add(m)
+
+            if media_keys:
+                db.commit()
+
             return place.id
         finally:
             db.close()
@@ -141,7 +157,6 @@ class PlaceService:
         left, bottom, right, top = [float(x) for x in bbox.split(",")]
         db = SessionLocal()
         try:
-            # джойн с User, чтобы достать tg_id
             q = (
                 db.query(Place, User)
                 .outerjoin(User, Place.user_id == User.id)
@@ -153,6 +168,22 @@ class PlaceService:
                 .limit(1000)
             )
             rows = q.all()
+
+            # заранее собираем id точек
+            place_ids = [place.id for place, _ in rows]
+            media_map: Dict[int, List[Dict]] = {}
+            if place_ids:
+                media_rows = db.query(Media).filter(Media.place_id.in_(place_ids)).all()
+                for m in media_rows:
+                    media_map.setdefault(m.place_id, []).append(
+                        {
+                            "id": m.id,
+                            "key": m.s3_key,
+                            # пока один и тот же URL для превью и полноразмерного
+                            "url": presign_get(m.s3_key),
+                        }
+                    )
+
             items: List[Dict] = []
             for place, user in rows:
                 items.append(
@@ -165,6 +196,7 @@ class PlaceService:
                         "user_id": place.user_id,
                         "user_tg_id": user.tg_id if user else None,
                         "username": user.username if user else None,
+                        "media": media_map.get(place.id, []),
                     }
                 )
             return items
