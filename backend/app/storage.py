@@ -75,3 +75,20 @@ def move_to_place_folder(old_key: str, place_id: int) -> str:
     s3.delete_object(Bucket=BUCKET, Key=old_key)
 
     return new_key
+
+def delete_place_folder(place_id: int) -> None:
+    """
+    Удаляет все объекты в S3 с префиксом places/<place_id>/.
+    """
+    s3 = s3_client()
+    ensure_bucket(s3)
+
+    prefix = f"places/{place_id}/"
+    paginator = s3.get_paginator("list_objects_v2")
+
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix):
+        contents = page.get("Contents", [])
+        if not contents:
+            continue
+        objects = [{"Key": obj["Key"]} for obj in contents]
+        s3.delete_objects(Bucket=BUCKET, Delete={"Objects": objects})

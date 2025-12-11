@@ -4,7 +4,7 @@ from .models import User, Place, Media
 import uuid
 from typing import Optional, List, Dict
 from sqlalchemy import text
-from .storage import presign_get, move_to_place_folder
+from .storage import presign_get, move_to_place_folder, delete_place_folder
 
 class UserService:
     @staticmethod
@@ -208,12 +208,16 @@ class PlaceService:
     
     @staticmethod
     def delete_place(db: Session, place_id: int, user: User) -> bool:
-        """Удаляет точку, если она принадлежит пользователю. Возвращает True/False."""
         place = db.query(Place).filter(Place.id == place_id).one_or_none()
         if not place:
             return False
         if place.user_id != user.id:
             return False
+
+        # сначала удаляем файлы из MinIO
+        delete_place_folder(place.id)
+
+        # потом удаляем запись из БД (media удалятся каскадом)
         db.delete(place)
         db.commit()
         return True

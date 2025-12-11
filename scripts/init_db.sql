@@ -63,3 +63,9 @@ CREATE TABLE IF NOT EXISTS friends (
   created_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (user_id, friend_id)
 );
+
+SELECT setval(
+  pg_get_serial_sequence('groups', 'id'),
+  COALESCE((SELECT MAX(id) FROM groups), 1),
+  true
+);
