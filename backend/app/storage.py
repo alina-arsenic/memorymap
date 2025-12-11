@@ -54,3 +54,24 @@ def presign_get(key: str, expires: int = 300) -> str:
         HttpMethod="GET",
     )
     return _apply_public_endpoint(url)
+
+def move_to_place_folder(old_key: str, place_id: int) -> str:
+    """
+    Перемещает объект в папку places/<place_id>/ и возвращает новый ключ.
+    Реализация через copy + delete.
+    """
+    s3 = s3_client()
+    ensure_bucket(s3)
+
+    # только имя файла из старого ключа
+    filename = old_key.split("/")[-1]
+    new_key = f"places/{place_id}/{filename}"
+
+    copy_source = {"Bucket": BUCKET, "Key": old_key}
+
+    # копируем
+    s3.copy_object(Bucket=BUCKET, CopySource=copy_source, Key=new_key)
+    # удаляем старый объект
+    s3.delete_object(Bucket=BUCKET, Key=old_key)
+
+    return new_key

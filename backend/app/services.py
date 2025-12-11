@@ -4,7 +4,7 @@ from .models import User, Place, Media
 import uuid
 from typing import Optional, List, Dict
 from sqlalchemy import text
-from .storage import presign_get
+from .storage import presign_get, move_to_place_folder
 
 class UserService:
     @staticmethod
@@ -136,10 +136,13 @@ class PlaceService:
 
             # медиа к точке
             for key in (media_keys or []):
+                # переносим в папку конкретной точки
+                new_key = move_to_place_folder(key, place.id)
+
                 m = Media(
                     place_id=place.id,
                     user_id=uid,
-                    s3_key=key,
+                    s3_key=new_key,
                     mime="image/jpeg",  # пока считаем, что только фото
                     status="ready",
                 )

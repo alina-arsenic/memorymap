@@ -44,9 +44,6 @@ def _ensure_personal_group(db: Session, user: User) -> None:
 def get_current_user(
     x_user_tg: Optional[int] = Header(default=None, alias="X-User-Tg"),
 ) -> Optional[User]:
-    """
-    Авторизация через заголовок X-User-Tg (Telegram ID).
-    """
     if x_user_tg is None:
         return None
 
@@ -60,6 +57,11 @@ def get_current_user(
             db.refresh(user)
 
         _ensure_personal_group(db, user)
+
+        # важно: вытащить данные и отвязать объект от сессии
+        db.refresh(user)
+        db.expunge(user)
+
         return user
     finally:
         db.close()
