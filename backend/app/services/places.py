@@ -91,6 +91,7 @@ class PlaceService:
                 "user_id": place.user_id,
                 "user_tg_id": user.tg_id if user else None,
                 "username": user.username if user else None,
+                "user_login": user.login if user else None,
                 "media": media_map.get(place.id, []),
             })
         return items

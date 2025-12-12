@@ -121,7 +121,20 @@ async def on_location(m: types.Message, state: FSMContext):
         "media_keys": [],
     }
 
-    r = requests.post(f"{API_BASE}/v1/places", json=payload)
+    r = requests.post(
+        f"{API_BASE}/v1/places/bot",
+        json=payload,
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+    )
+
+    if r.status_code == 400 and r.json().get("detail") == "telegram_not_linked":
+        await m.reply(
+            "Ваш Telegram не привязан к аккаунту.\n"
+            "Зайдите на сайт, войдите в аккаунт, "
+            "сгенерируйте код привязки и отправьте мне:\n\n"
+            "/link <code>"
+        )
+        return
 
     if not r.ok:
         await m.reply(f"Не удалось создать точку (код {r.status_code})")
@@ -242,8 +255,10 @@ async def add_photo(m: types.Message, state: FSMContext):
 
     # 1. просим backend выдать presigned URL с учётом лимита
     u = requests.post(
-        f"{API_BASE}/v1/media/presign-upload",
+        f"{API_BASE}/v1/bot/media/presign-upload",
+        headers={"X-Bot-Secret": BOT_API_SECRET},
         json={"mime": "image/jpeg", "ext": "jpg", "place_id": pid},
+        timeout=10,
     )
 
     if not u.ok:

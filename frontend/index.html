@@ -20,15 +20,37 @@
 
     <div class="card">
       <div class="sidebar-section-title">Пользователь</div>
-      <div class="field-label">Telegram ID</div>
-      <input id="user-id-input" class="input" placeholder="узнать через /whoami в боте" />
+
+      <!-- СКРЫВАЕМЫЙ БЛОК -->
+      <div id="auth-form">
+        <div class="field-label">Логин</div>
+        <input id="login-input" class="input" placeholder="" />
+
+        <div class="field-label" style="margin-top:6px;">Пароль</div>
+        <input id="password-input" type="password" class="input" placeholder="" />
+
+        <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="uiLogin()">Войти</button>
+          <button class="btn" onclick="uiRegister()">Регистрация</button>
+        </div>
+      </div>
+      <!-- /СКРЫВАЕМЫЙ БЛОК -->
+
       <div style="margin-top:6px; display:flex; gap:6px;">
-        <button class="btn btn-primary" onclick="fakeLogin()">Войти</button>
-        <button class="btn" onclick="fakeLogout()">Выйти</button>
+        <button class="btn" onclick="uiLogout()">Выйти</button>
       </div>
-      <div id="user-info" class="hint" style="margin-top:6px;">
-        Не авторизованы
+
+      <div id="user-info" class="hint" style="margin-top:6px;">Не авторизованы</div>
+
+      <div class="hint" style="margin-top:8px;">
+        Чтобы бот слал точки в ваш аккаунт: после входа сгенерируйте код привязки и отправьте боту команду <b>/link &lt;code&gt;</b>.
       </div>
+
+      <button id="tg-link-btn" class="btn" style="margin-top:6px;" onclick="startTelegramLink()">
+        Сгенерировать код привязки Telegram
+      </button>
+
+      <div id="tg-link-code" class="hint" style="margin-top:6px;"></div>
     </div>
 
     <div class="card">

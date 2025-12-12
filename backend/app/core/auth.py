@@ -35,37 +35,20 @@ def _ensure_personal_group(db: Session, user: User) -> None:
 
 def get_current_user(
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
-    x_user_tg: Optional[int] = Header(default=None, alias="X-User-Tg"),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
-    # 1) JWT Bearer
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-        try:
-            payload = decode_access_token(token)
-            uid = int(payload.get("sub"))
-        except Exception:
-            return None
-
-        user = db.query(User).filter(User.id == uid).one_or_none()
-        if not user:
-            return None
-
-        db.refresh(user)
-        db.expunge(user)
-        return user
-
-    # 2) Fallback: старый режим по Telegram ID (временно)
-    if x_user_tg is None:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = decode_access_token(token)
+        uid = int(payload.get("sub"))
+    except Exception:
         return None
 
-    user = db.query(User).filter(User.tg_id == x_user_tg).one_or_none()
+    user = db.query(User).filter(User.id == uid).one_or_none()
     if not user:
-        user = User(tg_id=x_user_tg, username=None)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        _ensure_personal_group(db, user)
+        return None
 
     db.refresh(user)
     db.expunge(user)

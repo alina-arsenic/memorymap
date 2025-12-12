@@ -1,11 +1,23 @@
 const API_BASE = ""; // тот же origin (http://localhost:8000)
-const LS_KEY = "mm_user_tg_id";
+const LS_TOKEN = "mm_token";
 
-let currentUserId = null;      // Telegram ID
+let accessToken = null;
+let currentUser = null; // объект из /v1/me
 let currentMarkers = [];       // ссылки на Marker, чтобы их удалять
 
 let tempMarker = null; // временный жёлтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
+
+async function apiFetch(path, { method = "GET", headers = {}, body = null } = {}) {
+  const h = { ...headers };
+  if (accessToken) h["Authorization"] = "Bearer " + accessToken;
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: h,
+    body,
+  });
+  return resp;
+}
 
 function createPin(isMine, overrideColor) {
 const color = overrideColor || (isMine ? "#10b981" : "#3b82f6"); // зелёный свои, синий чужие
@@ -23,18 +35,137 @@ wrapper.innerHTML = svg.trim();
 return wrapper.firstChild; // сам <svg>
 }
 
-function initUserFromStorage() {
-const saved = localStorage.getItem(LS_KEY);
-if (saved) {
-    currentUserId = saved;
-    const input = document.getElementById("user-id-input");
-    const info = document.getElementById("user-info");
-    if (input) input.value = saved;
-    if (info) {
-    info.innerText =
-        "Вы авторизованы как Telegram ID " + currentUserId;
-    }
+async function initAuthFromStorage() {
+  const saved = localStorage.getItem(LS_TOKEN);
+  if (!saved) return;
+  accessToken = saved;
+  await loadMe(); // если токен протух — сбросим ниже
 }
+
+async function loadMe() {
+  const info = document.getElementById("user-info");
+  const authForm = document.getElementById("auth-form");
+  const tgBtn = document.getElementById("tg-link-btn");
+  const tgEl = document.getElementById("tg-link-code");
+
+  const resp = await apiFetch("/v1/me");
+
+  // НЕ АВТОРИЗОВАНЫ / ТОКЕН ПРОТУХ
+  if (!resp.ok) {
+    accessToken = null;
+    currentUser = null;
+    localStorage.removeItem(LS_TOKEN);
+
+    if (info) info.innerText = "Не авторизованы";
+    if (authForm) authForm.style.display = ""; // показываем форму
+    if (tgBtn) tgBtn.style.display = "none";
+    if (tgEl) tgEl.innerText = "";
+    return;
+  }
+
+  // УСПЕШНО
+  currentUser = await resp.json();
+
+  const nick = currentUser.login || ("user#" + currentUser.id);
+  if (info) {
+    info.innerText = `Вы вошли как ${nick}`;
+  }
+
+  // прячем форму логина/регистрации
+  if (authForm) authForm.style.display = "none";
+
+  // Telegram статус
+  if (currentUser.tg_id) {
+    if (tgBtn) tgBtn.style.display = "none";
+    if (tgEl) tgEl.innerText = `Привязан Telegram ID: ${currentUser.tg_id}`;
+  } else {
+    if (tgBtn) tgBtn.style.display = "";
+    if (tgEl) tgEl.innerText = "Telegram не привязан.";
+  }
+}
+
+async function uiLogin() {
+  const login = document.getElementById("login-input").value.trim();
+  const password = document.getElementById("password-input").value;
+  if (!login || !password) {
+    alert("Введите логин и пароль.");
+    return;
+  }
+
+  const resp = await fetch(`${API_BASE}/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login, password }),
+  });
+
+  if (!resp.ok) {
+    alert("Неверный логин или пароль.");
+    return;
+  }
+
+  const data = await resp.json();
+  accessToken = data.access_token;
+  localStorage.setItem(LS_TOKEN, accessToken);
+
+  await loadMe();
+  refresh();
+}
+
+async function uiRegister() {
+  const login = document.getElementById("login-input").value.trim();
+  const password = document.getElementById("password-input").value;
+  if (!login || !password) {
+    alert("Введите логин и пароль.");
+    return;
+  }
+
+  const resp = await fetch(`${API_BASE}/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login, password }),
+  });
+
+  if (resp.status === 409) {
+    alert("Логин занят.");
+    return;
+  }
+  if (!resp.ok) {
+    alert("Ошибка регистрации.");
+    return;
+  }
+
+  // сразу логиним
+  await uiLogin();
+}
+
+function uiLogout() {
+  // 1. убрать токен и пользователя
+  accessToken = null;
+  currentUser = null;
+  localStorage.removeItem(LS_TOKEN);
+
+  // 2. показать форму логина
+  const authForm = document.getElementById("auth-form");
+  if (authForm) authForm.style.display = "";
+
+  // 3. обновить UI (user-info, tg-блоки и т.д.)
+  loadMe();
+}
+
+async function startTelegramLink() {
+  if (!accessToken) {
+    alert("Сначала войдите.");
+    return;
+  }
+  const el = document.getElementById("tg-link-code");
+  el.innerText = "Генерирую код...";
+  const resp = await apiFetch("/v1/me/telegram-link/start", { method: "POST" });
+  if (!resp.ok) {
+    el.innerText = "Ошибка генерации кода.";
+    return;
+  }
+  const data = await resp.json();
+  el.innerText = `Код: ${data.code}. Отправьте боту: /link ${data.code}`;
 }
 
 function fakeLogin() {
@@ -63,11 +194,9 @@ if (!tempCoords) {
     return;
 }
 
-if (!currentUserId) {
-    if (statusEl) {
-    statusEl.innerText = "Нужно авторизоваться: введите Telegram ID и нажмите «Войти».";
-    }
-    return;
+if (!accessToken) {
+  statusEl.innerText = "Нужно войти.";
+  return;
 }
 
 const titleInput = document.getElementById("web-title");
@@ -109,8 +238,6 @@ if (files.length > 0) {
 
 const body = {
     group_id: 1,
-    tg_id: Number(currentUserId),
-    username: null,
     title: title || null,
     note: note,
     lat: tempCoords.lat,
@@ -119,10 +246,10 @@ const body = {
 };
 
 try {
-    const resp = await fetch(`${API_BASE}/v1/places`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    const resp = await apiFetch("/v1/places", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
     });
 
     if (!resp.ok) {
@@ -176,10 +303,10 @@ for (const file of files) {
     const mime = file.type || "image/jpeg";
 
     // 1) просим пресайн для загрузки
-    const presignResp = await fetch(`${API_BASE}/v1/media/presign-upload`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mime, ext }),
+    const presignResp = await apiFetch("/v1/media/presign-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mime, ext }),
     });
     if (!presignResp.ok) {
     throw new Error("presign-upload failed: " + presignResp.status);
@@ -188,9 +315,9 @@ for (const file of files) {
 
     // 2) заливаем файл в MinIO
     const putResp = await fetch(u.url, {
-    method: "PUT",
-    headers: { "Content-Type": mime },
-    body: file,
+      method: "PUT",
+      headers: { "Content-Type": mime },
+      body: file,
     });
     if (!putResp.ok) {
     throw new Error("PUT to S3 failed: " + putResp.status);
@@ -335,12 +462,12 @@ if (!response.ok) {
 const data = await response.json();
 const items = data.items || [];
 
-const myId = currentUserId ? String(currentUserId) : null;
+const myUserId = currentUser?.id != null ? String(currentUser.id) : null;
 const filtered = [];
 
 for (const p of items) {
-    const ownerTg = p.user_tg_id != null ? String(p.user_tg_id) : null;
-    const isMine = myId && ownerTg && ownerTg === myId;
+    const ownerUserId = p.user_id != null ? String(p.user_id) : null;
+    const isMine = myUserId && ownerUserId && ownerUserId === myUserId;
 
     if (showPublic && showMy) {
     filtered.push({ ...p, isMine });
@@ -359,8 +486,8 @@ filtered.forEach(p => {
     const el = createPin(p.isMine);
 
     const who = p.isMine
-    ? "Моя точка"
-    : (p.username ? ("@" + p.username) : (p.user_tg_id ? "Пользователь " + p.user_tg_id : "Аноним"));
+        ? "Моя точка"
+        : (p.user_login ? p.user_login : (p.username ? ("@" + p.username) : "Аноним"));
 
     const displayTitle =
     p.title && p.title.trim()
@@ -420,8 +547,8 @@ if (!id) return;
 const confirmDelete = confirm("Удалить эту точку?");
 if (!confirmDelete) return;
 
-if (!currentUserId) {
-    alert("Нужно авторизоваться, чтобы удалять свои точки.");
+if (!accessToken) {
+    alert("Нужно авторизоваться, чтобы удалять точки.");
     return;
 }
 
@@ -430,12 +557,7 @@ const originalText = btn.textContent;
 btn.textContent = "Удаление...";
 
 try {
-    const resp = await fetch(`${API_BASE}/v1/places/${id}`, {
-    method: "DELETE",
-    headers: {
-        "X-User-Tg": currentUserId, // для get_current_user на backend
-    },
-    });
+    const resp = await apiFetch(`/v1/places/${id}`, { method: "DELETE" });
 
     if (!resp.ok) {
     console.error("Delete failed", resp.status);
@@ -481,6 +603,6 @@ const bigImg = modal.querySelector("img");
 bigImg.src = url;
 });
 
-initUserFromStorage();
+initAuthFromStorage();
 map.on("load", refresh);
 map.on("moveend", refresh);

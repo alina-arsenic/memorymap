@@ -2,10 +2,12 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+import uuid
 
+from app.storage import presign_put
 from app.core.deps import get_db
-from app.core.config import BOT_API_SECRET
-from app.models.models import User, TelegramLinkCode
+from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
+from app.models.models import User, TelegramLinkCode, Media
 from app.core.auth import _ensure_personal_group  # чтобы сразу завести личную группу
 
 router = APIRouter()
@@ -13,6 +15,11 @@ router = APIRouter()
 class BotLinkReq(BaseModel):
     code: str
     tg_id: int
+
+class BotPresignUploadReq(BaseModel):
+    mime: str
+    ext: str | None = None
+    place_id: int
 
 @router.post("/bot/link-telegram")
 def bot_link_telegram(
@@ -49,3 +56,22 @@ def bot_link_telegram(
     db.commit()
 
     return {"status": "ok", "user_id": user.id, "tg_id": user.tg_id}
+
+@router.post("/bot/media/presign-upload")
+def bot_presign_upload(
+    req: BotPresignUploadReq,
+    x_bot_secret: str | None = Header(default=None, alias="X-Bot-Secret"),
+    db: Session = Depends(get_db),
+):
+    if not BOT_API_SECRET or x_bot_secret != BOT_API_SECRET:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    # лимит фото на точку
+    count = db.query(Media).filter(Media.place_id == req.place_id).count()
+    if count >= MEDIA_LIMIT_PER_PLACE:
+        raise HTTPException(status_code=400, detail="media_limit")
+
+    ext = (req.ext or "").strip(".")
+    fname = f"uploads/{uuid.uuid4()}" + (f".{ext}" if ext else "")
+    url = presign_put(fname, req.mime)
+    return {"key": fname, "url": url, "expires_in": 600}

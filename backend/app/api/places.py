@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -9,13 +9,23 @@ from app.core.config import MEDIA_LIMIT_PER_PLACE
 from app.models.models import User, Place, Media
 from app.services.places import PlaceService
 from app.storage import move_to_place_folder
+from app.core.config import BOT_API_SECRET
+from app.services.users import UserService
+
 
 router = APIRouter()
 
 class PlaceCreate(BaseModel):
     group_id: int
-    user_id: Optional[int] = None
-    tg_id: Optional[int] = None
+    title: Optional[str] = None
+    note: Optional[str] = None
+    lat: float
+    lon: float
+    media_keys: List[str] = []
+
+class BotPlaceCreate(BaseModel):
+    group_id: int
+    tg_id: int
     username: Optional[str] = None
     title: Optional[str] = None
     note: Optional[str] = None
@@ -24,14 +34,59 @@ class PlaceCreate(BaseModel):
     media_keys: List[str] = []
 
 @router.post("/places")
-def create_place(p: PlaceCreate, db: Session = Depends(get_db)):
+def create_place(
+    p: PlaceCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    pid = PlaceService.create_place(
+        db=db,
+        group_id=p.group_id,
+        user_id=current_user.id,
+        tg_id=None,
+        username=None,
+        title=p.title,
+        note=p.note,
+        lat=p.lat,
+        lon=p.lon,
+        media_keys=p.media_keys,
+    )
+    return {"id": pid}
+
+@router.get("/places")
+def list_places(group_id: int, bbox: str, db: Session = Depends(get_db)):
+    items = PlaceService.list_places(db=db, group_id=group_id, bbox=bbox)
+    return {"items": items}
+
+@router.post("/places/bot")
+def create_place_bot(
+    p: BotPlaceCreate,
+    x_bot_secret: str | None = Header(default=None, alias="X-Bot-Secret"),
+    db: Session = Depends(get_db),
+):
+    if not BOT_API_SECRET or x_bot_secret != BOT_API_SECRET:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    # tg_id должен быть привязан к аккаунту
+    user = db.query(User).filter(User.tg_id == p.tg_id).one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="telegram_not_linked")
+
+    # можно обновлять username, если пришёл
+    if p.username and (user.username != p.username):
+        user.username = p.username
+        db.commit()
+
     try:
         pid = PlaceService.create_place(
             db=db,
             group_id=p.group_id,
-            user_id=p.user_id,
-            tg_id=p.tg_id,
-            username=p.username,
+            user_id=user.id,
+            tg_id=None,
+            username=None,
             title=p.title,
             note=p.note,
             lat=p.lat,
@@ -43,11 +98,6 @@ def create_place(p: PlaceCreate, db: Session = Depends(get_db)):
         if str(e) == "media_limit":
             raise HTTPException(status_code=400, detail="media_limit")
         raise
-
-@router.get("/places")
-def list_places(group_id: int, bbox: str, db: Session = Depends(get_db)):
-    items = PlaceService.list_places(db=db, group_id=group_id, bbox=bbox)
-    return {"items": items}
 
 @router.patch("/places/{place_id}")
 def update_place(place_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):

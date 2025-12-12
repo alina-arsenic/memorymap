@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
 from app.core.config import MEDIA_LIMIT_PER_PLACE
-from app.models.models import Media
+from app.models.models import Media, User
 from app.storage import presign_put, presign_get
+from app.core.auth import get_current_user
 
 router = APIRouter()
 
@@ -16,7 +17,9 @@ class PresignUploadReq(BaseModel):
     place_id: int | None = None
 
 @router.post("/media/presign-upload")
-def presign_upload(req: PresignUploadReq, db: Session = Depends(get_db)):
+def api_presign_upload(req: PresignUploadReq, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     if req.place_id is not None:
         count = db.query(Media).filter(Media.place_id == req.place_id).count()
         if count >= MEDIA_LIMIT_PER_PLACE:

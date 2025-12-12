@@ -30,6 +30,7 @@ def me(
     return {
         "id": current_user.id,
         "tg_id": current_user.tg_id,
+        "login": current_user.login,
         "username": current_user.username,
         "groups": groups,
         "friends": friends,
