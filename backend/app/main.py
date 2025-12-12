@@ -2,13 +2,13 @@ from typing import Optional, List, Dict
 from fastapi import FastAPI, Query, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from .storage import presign_put, presign_get
+from .storage import presign_put, presign_get, move_to_place_folder
 from .services import PlaceService, GroupService, UserService
 from .auth import get_current_user
 from .db import SessionLocal
-from .models import User
+from .models import User, Place, Media
 import uuid
-from fastapi import FastAPI, Query, Depends, HTTPException
+from fastapi import Body
 
 
 app = FastAPI(title="MemoryMap API")
@@ -24,10 +24,21 @@ def healthz():
 class PresignUploadReq(BaseModel):
     mime: str
     ext: str | None = None
+    place_id: int | None = None  # для лимита фото у конкретной точки
 
 
 @app.post("/v1/media/presign-upload")
 def api_presign_upload(req: PresignUploadReq):
+    # если привязано к точке – проверяем лимит
+    if req.place_id is not None:
+        db = SessionLocal()
+        try:
+            count = db.query(Media).filter(Media.place_id == req.place_id).count()
+        finally:
+            db.close()
+        if count >= 10:
+            raise HTTPException(status_code=400, detail="media_limit")
+
     ext = (req.ext or "").strip(".")
     fname = f"uploads/{uuid.uuid4()}" + (f".{ext}" if ext else "")
     url = presign_put(fname, req.mime)
@@ -151,6 +162,54 @@ def create_place(p: PlaceCreate):
 def list_places(group_id: int, bbox: str):
     items = PlaceService.list_places(group_id=group_id, bbox=bbox)
     return {"items": items}
+
+
+@app.patch("/v1/places/{place_id}")
+def update_place(place_id: int, payload: dict = Body(...)):
+    db = SessionLocal()
+    try:
+        place = db.query(Place).filter(Place.id == place_id).one_or_none()
+        if not place:
+            raise HTTPException(404, "Not found")
+
+        if "title" in payload:
+            place.title = payload["title"]
+        if "note" in payload:
+            place.note = payload["note"]
+
+        db.commit()
+        return {"status": "ok"}
+    finally:
+        db.close()
+
+
+class AddMediaReq(BaseModel):
+    temp_key: str
+
+
+@app.post("/v1/places/{place_id}/media")
+def add_media(place_id: int, req: AddMediaReq):
+    db = SessionLocal()
+    try:
+        place = db.query(Place).filter(Place.id == place_id).one_or_none()
+        if not place:
+            raise HTTPException(404, "Not found")
+
+        new_key = move_to_place_folder(req.temp_key, place_id)
+
+        m = Media(
+            place_id=place_id,
+            user_id=place.user_id,
+            s3_key=new_key,
+            mime="image/jpeg",
+            status="ready",
+        )
+        db.add(m)
+        db.commit()
+
+        return {"status": "ok"}
+    finally:
+        db.close()
 
 
 @app.delete("/v1/places/{place_id}")
