@@ -9,3 +9,6 @@ pydantic==2.9.2
 starlette==0.38.5
 sqlalchemy==2.0.36
 python-multipart==0.0.6
+passlib==1.7.4
+bcrypt==3.2.2
+PyJWT==2.9.0

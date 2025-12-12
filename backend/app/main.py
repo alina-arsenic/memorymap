@@ -1,9 +1,13 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import media, me, groups, places
+from app.api import media, me, groups, places, auth
+from app.api import bot as bot_api
+
 
 app = FastAPI(title="MemoryMap API")
+app.include_router(auth.router, prefix="/v1")
+app.include_router(bot_api.router, prefix="/v1")
 
 @app.get("/healthz")
 def healthz():

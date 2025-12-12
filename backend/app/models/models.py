@@ -1,12 +1,17 @@
-from sqlalchemy import Column, Integer, BigInteger, Text, Float, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, Text, Float, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from app.core.db import Base
 
+
 class User(Base):
     __tablename__ = "users"
+
     id = Column(Integer, primary_key=True)
     tg_id = Column(BigInteger, unique=True)
     username = Column(Text)
+
+    login = Column(Text, unique=True, nullable=True)
+    password_hash = Column(Text, nullable=True)
 
     places = relationship("Place", back_populates="user")
 
@@ -50,3 +55,14 @@ class Friend(Base):
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     friend_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     status = Column(Text, nullable=False, default="accepted")
+
+class TelegramLinkCode(Base):
+    __tablename__ = "telegram_link_codes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    code = Column(Text, nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")

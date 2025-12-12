@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from app.core.deps import get_db
 from app.models.models import User, Group
+from app.core.jwt import decode_access_token
 
 def _ensure_personal_group(db: Session, user: User) -> None:
     name = f"Личная карта {user.tg_id or user.id}"
@@ -33,9 +34,28 @@ def _ensure_personal_group(db: Session, user: User) -> None:
     db.commit()
 
 def get_current_user(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
     x_user_tg: Optional[int] = Header(default=None, alias="X-User-Tg"),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
+    # 1) JWT Bearer
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        try:
+            payload = decode_access_token(token)
+            uid = int(payload.get("sub"))
+        except Exception:
+            return None
+
+        user = db.query(User).filter(User.id == uid).one_or_none()
+        if not user:
+            return None
+
+        db.refresh(user)
+        db.expunge(user)
+        return user
+
+    # 2) Fallback: старый режим по Telegram ID (временно)
     if x_user_tg is None:
         return None
 

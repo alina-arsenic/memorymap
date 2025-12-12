@@ -8,6 +8,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_BASE = os.getenv("APP_BASE_URL", "http://api:8000")
+BOT_API_SECRET = os.getenv("BOT_API_SECRET", "")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -71,6 +72,37 @@ async def whoami(m: types.Message):
         f"username: @{m.from_user.username}" if m.from_user.username else ""
     )
 
+
+@dp.message(F.text.startswith("/link"))
+async def link_account(m: types.Message):
+    parts = (m.text or "").strip().split(maxsplit=1)
+    if len(parts) != 2:
+        await m.reply("Использование: /link <code> (код берётся на сайте).")
+        return
+
+    code = parts[1].strip()
+    if not BOT_API_SECRET:
+        await m.reply("Бот не настроен: нет BOT_API_SECRET.")
+        return
+
+    r = requests.post(
+        f"{API_BASE}/v1/bot/link-telegram",
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        json={"code": code, "tg_id": m.from_user.id},
+        timeout=10,
+    )
+    if r.ok:
+        await m.reply("Готово. Telegram привязан к вашему профилю.")
+    else:
+        # важные кейсы
+        if r.status_code == 400:
+            await m.reply("Код истёк. Сгенерируйте новый на сайте.")
+        elif r.status_code == 404:
+            await m.reply("Код не найден. Проверьте, что скопировали правильно.")
+        elif r.status_code == 409:
+            await m.reply("Код уже использован или этот Telegram уже привязан к другому аккаунту.")
+        else:
+            await m.reply(f"Ошибка привязки (код {r.status_code}).")
 
 # ---------- Location handler: create point ----------
 @dp.message(F.location)
