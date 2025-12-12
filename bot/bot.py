@@ -39,6 +39,30 @@ def back_menu():
     )
 
 
+async def show_menu(chat_id: int, state: FSMContext, text: str):
+    """
+    Показываем меню внизу, при этом старое меню (если было) удаляем.
+    """
+    data = await state.get_data()
+    old_id = data.get("menu_message_id")
+    if old_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=old_id)
+        except Exception:
+            # уже удалено / старое – игнорируем
+            pass
+
+    msg = await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=make_edit_menu()
+    )
+
+    await state.update_data(menu_message_id=msg.message_id)
+    # выходим в "нейтральное" состояние
+    await state.set_state(None)
+
+
 # ---------- Commands ----------
 @dp.message(F.text == "/whoami")
 async def whoami(m: types.Message):
@@ -73,16 +97,15 @@ async def on_location(m: types.Message, state: FSMContext):
 
     pid = r.json().get("id")
 
-    # сбрасываем старое состояние/данные
+    # сбрасываем всё старое, начинаем новый сеанс редактирования точки
     await state.clear()
+    await state.update_data(point_id=pid)
 
-    # отправляем сообщение-«меню» и запоминаем его id
-    menu_msg = await m.reply(
-        f"Точка создана (id {pid}). Теперь вы можете добавить данные.",
-        reply_markup=make_edit_menu()
+    await show_menu(
+        chat_id=m.chat.id,
+        state=state,
+        text=f"Точка создана (id {pid}). Выберите, что хотите сделать:"
     )
-
-    await state.update_data(point_id=pid, menu_message_id=menu_msg.message_id)
 
 
 # ---------- Callback: menu actions ----------
@@ -107,29 +130,33 @@ async def cb_add_photo(c: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "finish_point")
 async def cb_finish(c: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    menu_id = data.get("menu_message_id")
+    if menu_id:
+        try:
+            await bot.delete_message(chat_id=c.message.chat.id, message_id=menu_id)
+        except Exception:
+            pass
+
     await state.clear()
-    await c.message.edit_text("Готово. Точка сохранена.")
+    await c.message.answer("Готово. Точка сохранена. Чтобы создать новую, отправьте геолокацию.")
+    await c.answer()
 
 
 @dp.callback_query(F.data == "back")
 async def cb_back(c: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    pid = data.get("point_id")
-    menu_msg_id = data.get("menu_message_id")
-
-    if not pid or not menu_msg_id:
+    if not data.get("point_id"):
         await state.clear()
-        await c.message.edit_text("Ошибка состояния.")
+        await c.message.answer("Ошибка состояния. Отправьте геолокацию, чтобы создать точку.")
         return
 
-    await bot.edit_message_text(
+    await show_menu(
         chat_id=c.message.chat.id,
-        message_id=menu_msg_id,
-        text="Редактирование точки:",
-        reply_markup=make_edit_menu(),
+        state=state,
+        text="Редактирование точки. Выберите действие:"
     )
-    # состояние сбрасываем, данные (point_id, menu_message_id) сохраняем
-    await state.set_state(None)
+    await c.answer()  # чтобы убрать "часики" у кнопки
 
 
 # ---------- Title ----------
@@ -137,17 +164,15 @@ async def cb_back(c: types.CallbackQuery, state: FSMContext):
 async def set_title(m: types.Message, state: FSMContext):
     data = await state.get_data()
     pid = data["point_id"]
-    menu_msg_id = data["menu_message_id"]
 
     requests.patch(f"{API_BASE}/v1/places/{pid}", json={"title": m.text})
 
-    await bot.edit_message_text(
+    await show_menu(
         chat_id=m.chat.id,
-        message_id=menu_msg_id,
-        text="Название обновлено.\n\nРедактирование точки:",
-        reply_markup=make_edit_menu(),
+        state=state,
+        text="Название обновлено. Что дальше сделать с этой точкой?"
     )
-    await state.set_state(None)
+
 
 @dp.message(AddPoint.waiting_title)
 async def wrong_title(m: types.Message, state: FSMContext):
@@ -158,17 +183,14 @@ async def wrong_title(m: types.Message, state: FSMContext):
 async def set_note(m: types.Message, state: FSMContext):
     data = await state.get_data()
     pid = data["point_id"]
-    menu_msg_id = data["menu_message_id"]
 
     requests.patch(f"{API_BASE}/v1/places/{pid}", json={"note": m.text})
 
-    await bot.edit_message_text(
+    await show_menu(
         chat_id=m.chat.id,
-        message_id=menu_msg_id,
-        text="Описание обновлено.\n\nРедактирование точки:",
-        reply_markup=make_edit_menu(),
+        state=state,
+        text="Описание обновлено. Что дальше сделать с этой точкой?"
     )
-    await state.set_state(None)
 
 
 @dp.message(AddPoint.waiting_note)
@@ -181,7 +203,6 @@ async def wrong_note(m: types.Message, state: FSMContext):
 async def add_photo(m: types.Message, state: FSMContext):
     data = await state.get_data()
     pid = data["point_id"]
-    menu_msg_id = data["menu_message_id"]
 
     file_id = m.photo[-1].file_id
     f = await bot.get_file(file_id)
@@ -195,7 +216,7 @@ async def add_photo(m: types.Message, state: FSMContext):
 
     if not u.ok:
         if u.status_code == 400:
-            await m.reply("Уже 10 фотографий для одной точки. Новые не будут добавлены.")
+            await m.reply("У этой точки уже 10 фотографий. Новые не добавляю.")
         else:
             await m.reply("Ошибка подготовки загрузки фото.")
         return
@@ -220,19 +241,29 @@ async def add_photo(m: types.Message, state: FSMContext):
     # 5. привязываем temp_key к точке
     requests.post(f"{API_BASE}/v1/places/{pid}/media", json={"temp_key": temp_key})
 
-    # 6. возвращаем основное меню, «Назад» пропадает
-    await bot.edit_message_text(
-        chat_id=m.chat.id,
-        message_id=menu_msg_id,
-        text="Фото добавлено.\n\nРедактирование точки:",
-        reply_markup=make_edit_menu(),
-    )
-    await state.set_state(None)
+    # просто подтверждаем, остаёмся в режиме ожидания фото
+    await m.reply("Фото добавлено.")
 
 
 @dp.message(AddPoint.waiting_photo)
 async def wrong_photo(m: types.Message, state: FSMContext):
     await m.reply("Присылайте фотографию. Или нажмите «Назад».")
+
+
+@dp.message()
+async def fallback_message(m: types.Message, state: FSMContext):
+    data = await state.get_data()
+    pid = data.get("point_id")
+
+    # если активной точки ещё нет – просим сначала геолокацию
+    if not pid:
+        # не трогаем /whoami и локацию, они уже обрабатываются выше
+        if not m.location and m.text not in ("/start", "/whoami"):
+            await m.reply("Сначала отправьте геолокацию - я создам точку и покажу меню.")
+        return
+
+    # точка есть, но пользователь пишет "что-то ещё", а не по шагам
+    await m.reply("Сейчас можно пользоваться меню под последним сообщением бота.")
 
 
 # ---------- Run ----------
