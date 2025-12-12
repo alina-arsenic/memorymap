@@ -1,7 +1,6 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
 
+# PostgreSQL
 PG_HOST = os.getenv("POSTGRES_HOST", "db")
 PG_PORT = os.getenv("POSTGRES_PORT", "5432")
 PG_DB   = os.getenv("POSTGRES_DB", "memorymap")
@@ -12,10 +11,8 @@ DATABASE_URL = (
     f"postgresql+psycopg2://{PG_USER}:{PG_PASS}@{PG_HOST}:{PG_PORT}/{PG_DB}"
 )
 
-engine = create_engine(DATABASE_URL, echo=False, future=True)
+# App
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://api:8000")
 
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-
-class Base(DeclarativeBase):
-    pass
+# Media limits
+MEDIA_LIMIT_PER_PLACE = int(os.getenv("MEDIA_LIMIT_PER_PLACE", "12"))

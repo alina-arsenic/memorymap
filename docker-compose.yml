@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - ./scripts:/docker-entrypoint-initdb.d:ro
+      - ./backend/scripts:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -15,11 +15,6 @@ services:
       retries: 20
     ports:
       - "5432:5432"
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
 
   minio:
     image: minio/minio:latest
@@ -40,8 +35,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_started
       minio:
         condition: service_started
     volumes:
@@ -55,16 +48,6 @@ services:
     env_file: .env
     depends_on:
       api:
-        condition: service_started
-
-  worker:
-    build:
-      context: ./worker
-    env_file: .env
-    depends_on:
-      redis:
-        condition: service_started
-      minio:
         condition: service_started
 
 volumes:

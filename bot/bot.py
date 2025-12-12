@@ -216,7 +216,7 @@ async def add_photo(m: types.Message, state: FSMContext):
 
     if not u.ok:
         if u.status_code == 400:
-            await m.reply("У этой точки уже 10 фотографий. Новые не добавляю.")
+            await m.reply("У этой точки уже 12 фотографий. Новые не добавляю.")
         else:
             await m.reply("Ошибка подготовки загрузки фото.")
         return
