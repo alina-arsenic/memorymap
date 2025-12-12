@@ -198,6 +198,28 @@
       color: #374151;
     }
 
+    /* Ограничиваем попап по размеру и даём скролл */
+    .maplibregl-popup-content {
+      max-width: 350px;
+    }
+
+    .mm-popup {
+      max-width: 350px;
+      max-height: 400px;   /* можно подправить */
+      overflow: auto;
+    }
+
+    .mm-popup-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .mm-popup-note {
+      white-space: pre-wrap;     /* сохраняет переносы строк */
+      overflow-wrap: anywhere;   /* ломает длинные слова/ссылки */
+      line-height: 1.25;
+    }
+
     @media (max-width: 800px) {
       .app {
         grid-template-columns: 1fr;
@@ -692,11 +714,15 @@
         photosHtml = `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${thumbs}</div>`;
       }
 
-      const popupHtml = `<b>${displayTitle}</b><br>
-      ${p.note || ""}<br>
-      <span style="font-size:11px;color:#6b7280;">${who}</span>
-      ${deleteButtonHtml}
-      ${photosHtml}`;
+      const popupHtml = `
+        <div class="mm-popup">
+          <div class="mm-popup-title">${displayTitle}</div>
+          <div class="mm-popup-note">${p.note || ""}</div>
+          <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
+          ${deleteButtonHtml}
+          ${photosHtml}
+        </div>
+      `;
 
       const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
         .setLngLat([p.lon, p.lat])
