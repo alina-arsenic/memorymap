@@ -138,25 +138,40 @@ class AddMediaReq(BaseModel):
     temp_key: str
 
 @router.post("/places/{place_id}/media")
-def add_media(place_id: int, req: AddMediaReq, db: Session = Depends(get_db)):
+def add_media(
+    place_id: int,
+    req: AddMediaReq,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     place = db.query(Place).filter(Place.id == place_id).one_or_none()
     if not place:
         raise HTTPException(404, "Not found")
 
+    if place.user_id != current_user.id:
+        raise HTTPException(403, "Forbidden")
+
     count = db.query(Media).filter(Media.place_id == place_id).count()
-    if count >= MEDIA_LIMIT_PER_PLACE:
+    if count >= 12:
         raise HTTPException(status_code=400, detail="media_limit")
 
     new_key = move_to_place_folder(req.temp_key, place_id)
-    db.add(Media(
+
+    m = Media(
         place_id=place_id,
-        user_id=place.user_id,
+        user_id=current_user.id,
         s3_key=new_key,
         mime="image/jpeg",
         status="ready",
-    ))
+    )
+    db.add(m)
     db.commit()
-    return {"status": "ok"}
+    db.refresh(m)
+
+    return {"id": m.id, "key": m.s3_key}
 
 @router.delete("/places/{place_id}")
 def delete_place(

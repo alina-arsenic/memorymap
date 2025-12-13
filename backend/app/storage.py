@@ -92,3 +92,8 @@ def delete_place_folder(place_id: int) -> None:
             continue
         objects = [{"Key": obj["Key"]} for obj in contents]
         s3.delete_objects(Bucket=BUCKET, Delete={"Objects": objects})
+
+def delete_object(key: str) -> None:
+    s3 = s3_client()
+    ensure_bucket(s3)
+    s3.delete_object(Bucket=BUCKET, Key=key)

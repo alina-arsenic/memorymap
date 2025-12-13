@@ -44,20 +44,59 @@ function applyAuthUI(isAuthed) {
   if (logoutBtn) logoutBtn.style.display = isAuthed ? "" : "none";
   if (authedOnly) authedOnly.style.display = isAuthed ? "" : "none";
 
-  const tgBtn = document.getElementById("tg-link-btn");
-  const tgHint = document.getElementById("tg-hint");
   const tgStatus = document.getElementById("tg-status");
-  const tgCode = document.getElementById("tg-link-code");
-
-  // ВАЖНО: по умолчанию скрываем tg-блоки всегда.
-  // loadMe() потом включит их, если надо.
-  if (tgBtn) tgBtn.style.display = "none";
-  if (tgHint) tgHint.style.display = "none";
-  if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
 
   if (!isAuthed) {
     if (tgStatus) tgStatus.innerText = "";
   }
+}
+
+let _mmModalResolve = null;
+
+function mmOpenModal({ title, mode, initial }) {
+  const modal = document.getElementById("mm-edit-modal");
+  const t = document.getElementById("mm-modal-title");
+  const inp = document.getElementById("mm-modal-input");
+  const ta = document.getElementById("mm-modal-textarea");
+
+  t.innerText = title;
+
+  if (mode === "title") {
+    inp.style.display = "";
+    ta.style.display = "none";
+    inp.value = initial || "";
+    setTimeout(() => inp.focus(), 0);
+  } else {
+    inp.style.display = "none";
+    ta.style.display = "";
+    ta.value = initial || "";
+    setTimeout(() => ta.focus(), 0);
+  }
+
+  modal.style.display = "";
+
+  return new Promise((resolve) => {
+    _mmModalResolve = resolve;
+  });
+}
+
+function mmModalCancel() {
+  const modal = document.getElementById("mm-edit-modal");
+  modal.style.display = "none";
+  if (_mmModalResolve) _mmModalResolve(null);
+  _mmModalResolve = null;
+}
+
+function mmModalSave() {
+  const modal = document.getElementById("mm-edit-modal");
+  const inp = document.getElementById("mm-modal-input");
+  const ta = document.getElementById("mm-modal-textarea");
+
+  const val = inp.style.display !== "none" ? inp.value : ta.value;
+
+  modal.style.display = "none";
+  if (_mmModalResolve) _mmModalResolve(val);
+  _mmModalResolve = null;
 }
 
 async function initAuthFromStorage() {
@@ -125,8 +164,6 @@ async function loadMe() {
     if (tgStatus) tgStatus.innerText = "Telegram не привязан.";
     if (tgBtn) tgBtn.style.display = "";
     if (tgHint) tgHint.style.display = "";
-    // код показываем только после генерации
-    if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
   }
 }
 
@@ -164,6 +201,11 @@ async function uiRegister() {
 
   if (!login || !password) {
     alert("Введите логин и пароль.");
+    return;
+  }
+
+  if (password.length < 8) {
+    alert("Пароль должен быть не короче 8 символов.");
     return;
   }
 
@@ -236,38 +278,35 @@ async function startTelegramLink() {
   }
 
   const tgCode = document.getElementById("tg-link-code");
-  if (tgCode) tgCode.innerText = "Генерирую код...";
-
-  const resp = await apiFetch("/v1/me/telegram-link/start", { method: "POST" });
-  if (!resp.ok) {
-    if (tgCode) tgCode.innerText = "Ошибка генерации кода.";
-    return;
+  if (tgCode) {
+    tgCode.style.display = "";
+    tgCode.innerText = "Генерирую код...";
   }
 
-  const data = await resp.json();
-  if (tgCode) tgCode.innerText = `Код: ${data.code}. Отправьте боту: /link ${data.code}`;
+  try {
+    const resp = await apiFetch("/v1/me/telegram-link/start", { method: "POST" });
 
-  // ждём привязку (без перезагрузки страницы)
-  let attempts = 30;
-  const timer = setInterval(async () => {
-    attempts--;
-    await loadMe();
-    if (currentUser?.tg_id || attempts <= 0) clearInterval(timer);
-  }, 2000);
-}
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      if (tgCode) tgCode.innerText = `Ошибка генерации кода (${resp.status}). ${txt}`;
+      return;
+    }
 
-function fakeLogin() {
-const v = document.getElementById("user-id-input").value.trim();
-if (!v) {
-    alert("Введи свой Telegram ID (узнать через /whoami в боте).");
-    return;
-}
-currentUserId = v;
-localStorage.setItem(LS_KEY, currentUserId);
-document.getElementById("user-info").innerText =
-    "Вы авторизованы как Telegram ID " + currentUserId +
-    ". Точки, добавленные через бота, воспринимаются как ваши.";
-refresh();
+    const data = await resp.json();
+    if (tgCode) tgCode.innerText = `Отправьте боту:\n/link ${data.code}`;
+
+    // ждём привязку (без перезагрузки страницы)
+    let attempts = 30;
+    const timer = setInterval(async () => {
+      attempts--;
+      await loadMe();
+      if (currentUser?.tg_id || attempts <= 0) clearInterval(timer);
+    }, 2000);
+
+  } catch (e) {
+    console.error(e);
+    if (tgCode) tgCode.innerText = "Ошибка сети при генерации кода.";
+  }
 }
 
 async function addWebPoint() {
@@ -522,138 +561,172 @@ tempMarker = new maplibregl.Marker({ element: el, anchor: "bottom" })
 
 const status = document.getElementById("web-add-status");
 if (status) {
-    status.innerText = "Временная точка выбрана. Заполните поля и нажмите «Добавить точку».";
+    status.innerText = "Временная точка выбрана.";
 }
 }
 
 async function refresh() {
-const showPublic = document.getElementById("layer-public").checked;
-const showMy = document.getElementById("layer-my").checked;
+  const showPublic = document.getElementById("layer-public").checked;
+  const showMy = document.getElementById("layer-my").checked;
 
-if (!showPublic && !showMy) {
-    clearMarkers();
-    updateCounter(0);
-    return;
-}
+  if (!showPublic && !showMy) {
+      clearMarkers();
+      updateCounter(0);
+      return;
+  }
 
-const bounds = map.getBounds();
-const bbox = [
-    bounds.getWest(),
-    bounds.getSouth(),
-    bounds.getEast(),
-    bounds.getNorth()
-].join(",");
+  const bounds = map.getBounds();
+  const bbox = [
+      bounds.getWest(),
+      bounds.getSouth(),
+      bounds.getEast(),
+      bounds.getNorth()
+  ].join(",");
 
-let response;
-try {
-    // все точки физически лежат в группе 1 (публичная группа)
-    response = await fetch(`${API_BASE}/v1/places?group_id=1&bbox=${bbox}`);
-} catch (e) {
-    console.error(e);
-    setStatus("Ошибка соединения с API", true);
-    return;
-}
+  let response;
+  try {
+      // все точки физически лежат в группе 1 (публичная группа)
+      response = await fetch(`${API_BASE}/v1/places?group_id=1&bbox=${bbox}`);
+  } catch (e) {
+      console.error(e);
+      setStatus("Ошибка соединения с API", true);
+      return;
+  }
 
-if (!response.ok) {
-    console.error("Bad status:", response.status);
-    setStatus("Ошибка API: " + response.status, true);
-    return;
-}
+  if (!response.ok) {
+      console.error("Bad status:", response.status);
+      setStatus("Ошибка API: " + response.status, true);
+      return;
+  }
 
-const data = await response.json();
-const items = data.items || [];
+  const data = await response.json();
+  const items = data.items || [];
 
-const myUserId = currentUser?.id != null ? String(currentUser.id) : null;
-const filtered = [];
+  const myUserId = currentUser?.id != null ? String(currentUser.id) : null;
+  const filtered = [];
 
-for (const p of items) {
-    const ownerUserId = p.user_id != null ? String(p.user_id) : null;
-    const isMine = myUserId && ownerUserId && ownerUserId === myUserId;
+  for (const p of items) {
+      const ownerUserId = p.user_id != null ? String(p.user_id) : null;
+      const isMine = myUserId && ownerUserId && ownerUserId === myUserId;
 
-    if (showPublic && showMy) {
-    filtered.push({ ...p, isMine });
-    } else if (showMy && !showPublic) {
-    if (isMine) {
-        filtered.push({ ...p, isMine: true });
-    }
-    } else if (showPublic && !showMy) {
-    filtered.push({ ...p, isMine });
-    }
-}
+      if (showPublic && showMy) {
+      filtered.push({ ...p, isMine });
+      } else if (showMy && !showPublic) {
+      if (isMine) {
+          filtered.push({ ...p, isMine: true });
+      }
+      } else if (showPublic && !showMy) {
+      filtered.push({ ...p, isMine });
+      }
+  }
 
-clearMarkers();
+  clearMarkers();
 
-filtered.forEach(p => {
-    const el = createPin(p.isMine);
+  filtered.forEach(p => {
+      const el = createPin(p.isMine);
 
-    const who = p.isMine
-        ? "Моя точка"
-        : (p.user_login ? p.user_login : (p.username ? ("@" + p.username) : "Аноним"));
+      const who = p.isMine
+          ? "Моя точка"
+          : (p.user_login ? p.user_login : (p.username ? ("@" + p.username) : "Аноним"));
 
-    const displayTitle =
-    p.title && p.title.trim()
+      const displayTitle =
+      p.title && p.title.trim()
+          ? p.title
+          : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
+
+      let deleteButtonHtml = "";
+      if (p.isMine) {
+      deleteButtonHtml = `<br><button class="mm-delete-btn" data-id="${p.id}" style="margin-top:4px;font-size:12px;padding:4px 8px;border-radius:9999px;border:1px solid #dc2626;background:#fee2e2;color:#b91c1c;cursor:pointer;">
+          Удалить точку
+      </button>`;
+      }
+
+      let photosHtml = "";
+      if (p.media && p.media.length) {
+      const thumbs = p.media.slice(0, 12).map(m => {
+        const safeUrl = m.url;
+        const del = p.isMine
+          ? `<button class="mm-del-media-btn" data-media-id="${m.id}" title="Удалить"
+              style="position:absolute;top:2px;right:2px;border:none;background:rgba(0,0,0,0.55);color:#fff;border-radius:9999px;width:18px;height:18px;cursor:pointer;">
+              ×
+            </button>`
+          : "";
+
+        return `
+          <div style="position:relative;width:60px;height:60px;">
+            <img src="${safeUrl}" data-full="${safeUrl}" class="mm-photo-thumb"
+                style="width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;" />
+            ${del}
+          </div>
+        `;
+      }).join("");
+
+      photosHtml = `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${thumbs}</div>`;
+      }
+
+      const initialTitle = (p.title || "").trim()
         ? p.title
         : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
 
-    let deleteButtonHtml = "";
-    if (p.isMine) {
-    deleteButtonHtml = `<br><button class="mm-delete-btn" data-id="${p.id}" style="margin-top:4px;font-size:12px;padding:4px 8px;border-radius:9999px;border:1px solid #dc2626;background:#fee2e2;color:#b91c1c;cursor:pointer;">
-        Удалить точку
-    </button>`;
-    }
+      const initialNote = p.note || "";
 
-    let photosHtml = "";
-    if (p.media && p.media.length) {
-    const thumbs = p.media.slice(0, 12).map(m => {
-        const safeUrl = m.url;
-        return `<img src="${safeUrl}"
-                    data-full="${safeUrl}"
-                    class="mm-photo-thumb"
-                    style="width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;margin-right:4px;margin-top:4px;" />`;
-    }).join("");
+      // очень важно: экранируем кавычки, иначе атрибут data-initial сломается
+      const esc = (s) => String(s).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-    photosHtml = `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${thumbs}</div>`;
-    }
+      const titleBlock = p.isMine
+        ? `<div class="mm-edit-row">
+            <div class="mm-popup-title">${esc(initialTitle)}</div>
+            <button class="mm-edit-btn" data-id="${p.id}" data-field="title" data-initial="${esc(initialTitle)}" title="Редактировать">✎</button>
+          </div>`
+        : `<div class="mm-popup-title">${esc(initialTitle)}</div>`;
 
-    const titleBlock = p.isMine
-      ? `<div class="mm-edit-row">
-          <div class="mm-popup-title">${displayTitle}</div>
-          <button class="mm-edit-btn" data-id="${p.id}" data-field="title" title="Редактировать">✎</button>
-        </div>`
-      : `<div class="mm-popup-title">${displayTitle}</div>`;
+      const noteBlock = p.isMine
+        ? `<div class="mm-edit-row">
+            <div class="mm-popup-note">${esc(initialNote)}</div>
+            <button class="mm-edit-btn" data-id="${p.id}" data-field="note" data-initial="${esc(initialNote)}" title="Редактировать">✎</button>
+          </div>`
+        : `<div class="mm-popup-note">${esc(initialNote)}</div>`;
 
-    const noteBlock = p.isMine
-      ? `<div class="mm-edit-row">
-          <div class="mm-popup-note">${p.note || ""}</div>
-          <button class="mm-edit-btn" data-id="${p.id}" data-field="note" title="Редактировать">✎</button>
-        </div>`
-      : `<div class="mm-popup-note">${p.note || ""}</div>`;
+      const limit = 12;
+      const have = (p.media || []).length;
+      const canAdd = p.isMine && have < limit;
+      const addBtnHtml = canAdd
+        ? `<div style="margin-top:6px;">
+            <button class="btn mm-add-photo-btn" data-id="${p.id}" data-have="${have}">
+              Добавить фото
+            </button>
+          </div>`
+        : "";
 
-    const popupHtml = `
-      <div class="mm-popup">
-        ${titleBlock}
-        ${noteBlock}
-        <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
-        ${deleteButtonHtml}
-        ${photosHtml}
-      </div>
-    `;
+      const popupHtml = `
+        <div class="mm-popup">
+          ${titleBlock}
+          ${noteBlock}
+          <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
+          ${addBtnHtml}
+          ${photosHtml}
+          ${deleteButtonHtml}
+        </div>
+      `;
 
-    const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
-    .setLngLat([p.lon, p.lat])
-    .setPopup(new maplibregl.Popup().setHTML(popupHtml))
-    .addTo(map);
+      const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([p.lon, p.lat])
+      .setPopup(new maplibregl.Popup().setHTML(popupHtml))
+      .addTo(map);
 
-    currentMarkers.push(marker);
-});
+      currentMarkers.push(marker);
+  });
 
-updateCounter(filtered.length);
-setStatus("Подключено к API", false);
+  updateCounter(filtered.length);
+  setStatus("Подключено к API", false);
 }
 
 document.addEventListener("click", async (e) => {
   const btn = e.target;
   if (!btn.classList.contains("mm-delete-btn")) return;
+
+  e.preventDefault();
+  e.stopPropagation();
 
   const id = btn.getAttribute("data-id");
   if (!id) return;
@@ -696,16 +769,22 @@ document.addEventListener("click", async (e) => {
   const btn = e.target;
   if (!btn.classList || !btn.classList.contains("mm-edit-btn")) return;
 
+  e.preventDefault();
+  e.stopPropagation();
+
   const id = btn.getAttribute("data-id");
   const field = btn.getAttribute("data-field");
+  const initial = btn.getAttribute("data-initial") || "";
   if (!id || !field) return;
 
-  if (!accessToken) {
-    alert("Нужно войти.");
-    return;
-  }
+  if (!accessToken) { alert("Нужно войти."); return; }
 
-  const next = prompt(field === "title" ? "Новое название:" : "Новая заметка:");
+  const next = await mmOpenModal({
+    title: field === "title" ? "Редактировать название" : "Редактировать заметку",
+    mode: field,
+    initial,
+  });
+
   if (next === null) return;
 
   const payload = {};
@@ -717,38 +796,135 @@ document.addEventListener("click", async (e) => {
     body: JSON.stringify(payload),
   });
 
-  if (!resp.ok) {
-    alert("Не удалось сохранить (код " + resp.status + ")");
-    return;
-  }
+  if (!resp.ok) { alert("Не удалось сохранить (код " + resp.status + ")"); return; }
 
   refresh();
 });
 
-// Открытие фото в полноразмерном режиме
+// ========= Фото: открытие модалки =========
 document.addEventListener("click", (e) => {
-const img = e.target;
-if (!img.classList || !img.classList.contains("mm-photo-thumb")) return;
+  const img = e.target.closest(".mm-photo-thumb");
+  if (!img) return;
 
-const url = img.getAttribute("data-full") || img.src;
+  e.preventDefault();
+  e.stopPropagation();
 
-let modal = document.getElementById("mm-photo-modal");
-if (!modal) {
+  const url = img.getAttribute("data-full") || img.src;
+
+  let modal = document.getElementById("mm-photo-modal");
+  if (!modal) {
     modal = document.createElement("div");
     modal.id = "mm-photo-modal";
     modal.className = "mm-photo-modal";
-    modal.addEventListener("click", () => {
-    modal.remove();
-    });
+    modal.addEventListener("click", () => modal.remove());
 
     const bigImg = document.createElement("img");
     modal.appendChild(bigImg);
 
     document.body.appendChild(modal);
-}
+  }
 
-const bigImg = modal.querySelector("img");
-bigImg.src = url;
+  const bigImg = modal.querySelector("img");
+  bigImg.src = url;
+});
+
+// ========= Фото: добавить/удалить =========
+let _mmUploadPlaceId = null;
+
+document.addEventListener("click", async (e) => {
+  // удалить фото (крестик)
+  const delMediaBtn = e.target.closest(".mm-del-media-btn");
+  if (delMediaBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const mediaId = delMediaBtn.getAttribute("data-media-id");
+    if (!mediaId) return;
+
+    if (!accessToken) { alert("Нужно войти."); return; }
+    if (!confirm("Удалить фото?")) return;
+
+    const resp = await apiFetch(`/v1/media/${mediaId}`, { method: "DELETE" });
+    if (!resp.ok) { alert("Не удалось удалить фото (код " + resp.status + ")"); return; }
+
+    refresh();
+    return;
+  }
+
+  // добавить фото
+  const addPhotoBtn = e.target.closest(".mm-add-photo-btn");
+  if (addPhotoBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!accessToken) { alert("Нужно войти."); return; }
+
+    const placeId = addPhotoBtn.getAttribute("data-id");
+    const have = Number(addPhotoBtn.getAttribute("data-have") || "0");
+    const remaining = 12 - have;
+
+    if (!placeId) return;
+    if (remaining <= 0) { alert("Лимит фото достигнут."); return; }
+
+    _mmUploadPlaceId = placeId;
+
+    const inp = document.getElementById("mm-photo-input");
+    inp.value = "";
+    inp.setAttribute("data-remaining", String(remaining));
+    inp.click();
+    return;
+  }
+});
+
+document.getElementById("mm-photo-input").addEventListener("change", async (e) => {
+  const inp = e.target;
+  const files = inp.files ? Array.from(inp.files) : [];
+  if (!files.length) return;
+
+  const remaining = Number(inp.getAttribute("data-remaining") || "0");
+  const placeId = _mmUploadPlaceId;
+  if (!placeId) return;
+
+  if (files.length > remaining) {
+    alert(`Можно добавить только ${remaining} фото(шт).`);
+    return;
+  }
+
+  try {
+    for (const file of files) {
+      const ext = file.name.includes(".") ? file.name.split(".").pop() : "";
+      const mime = file.type || "image/jpeg";
+
+      const presignResp = await apiFetch("/v1/media/presign-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mime, ext, place_id: Number(placeId) }),
+      });
+      if (!presignResp.ok) throw new Error("presign " + presignResp.status);
+      const u = await presignResp.json();
+
+      const putResp = await fetch(u.url, {
+        method: "PUT",
+        headers: { "Content-Type": mime },
+        body: file,
+      });
+      if (!putResp.ok) throw new Error("put " + putResp.status);
+
+      const linkResp = await apiFetch(`/v1/places/${placeId}/media`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ temp_key: u.key }),
+      });
+      if (!linkResp.ok) throw new Error("link " + linkResp.status);
+    }
+
+    refresh();
+  } catch (err) {
+    console.error(err);
+    alert("Ошибка при добавлении фото.");
+  } finally {
+    _mmUploadPlaceId = null;
+  }
 });
 
 initAuthFromStorage();

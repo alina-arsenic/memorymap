@@ -14,7 +14,7 @@
     <div>
       <h1>MemoryMap</h1>
       <div class="subtitle">
-        Личная и групповая карта значимых мест
+        Карта значимых мест
       </div>
     </div>
 
@@ -45,7 +45,7 @@
 
     <!-- ПОДСКАЗКА про бота (скрываем, когда tg уже привязан) -->
     <div id="tg-hint" class="hint" style="margin-top:8px; display:none;">
-      Чтобы бот слал точки в ваш аккаунт: после входа сгенерируйте код привязки и отправьте боту команду <b>/link &lt;code&gt;</b>.
+      Хотите отправлять точки через Telegram?
     </div>
 
     <!-- КНОПКА генерации кода (скрываем, когда tg уже привязан) -->
@@ -63,11 +63,11 @@
       <div class="layers-list">
         <label>
           <input type="checkbox" id="layer-public" checked onchange="onLayerChange()">
-          <span>Публичные точки (общая карта)</span>
+          <span>Все точки</span>
         </label>
         <label>
           <input type="checkbox" id="layer-my" checked onchange="onLayerChange()">
-          <span>Мои точки (по Telegram ID)</span>
+          <span>Мои точки</span>
         </label>
       </div>
       <div class="hint">
@@ -77,19 +77,19 @@
     <div class="card">
       <div class="sidebar-section-title">Добавление точек</div>
       <div class="hint" style="margin-bottom:8px;">
-        Чтобы добавить точку с веб-карты, нажмите <b>правой кнопкой мыши</b> по карте — появится временный жёлтый пин.
+        Нажмите <b>правой кнопкой мыши</b> по карте - появится временный желтый пин.
       </div>
 
       <div class="field-label">Название</div>
-      <input id="web-title" class="input" placeholder="Можно оставить пустым" />
+      <input id="web-title" class="input" placeholder="Или его отсутствие" />
 
       <div class="field-label" style="margin-top:6px;">Описание</div>
-      <textarea id="web-note" class="input" rows="3" style="resize:vertical;"></textarea>
+      <textarea id="web-note" class="input" placeholder="Если есть желание - расскажите, что тут интересного" rows="3" style="resize:vertical;"></textarea>
 
       <div class="field-label" style="margin-top:6px;">Фотографии (до 12 шт.)</div>
       <input id="web-photos" type="file" accept="image/*" multiple class="input" />
 
-      <div class="field-label" style="margin-top:6px;">Координаты временной точки</div>
+      <div class="field-label" style="margin-top:6px;">Координаты</div>
       <div id="web-coords" class="hint">
         ПКМ по карте, чтобы выбрать точку.
       </div>
@@ -127,6 +127,19 @@
 </div>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
-<script src="/app.js"></script>
+<script src="/app.js" defer></script>
+<div id="mm-edit-modal" class="mm-modal" style="display:none;">
+  <div class="mm-modal-card">
+    <div class="mm-modal-title" id="mm-modal-title"></div>
+    <input id="mm-modal-input" class="input" style="display:none;" />
+    <textarea id="mm-modal-textarea" class="input" rows="6" style="display:none; resize:vertical;"></textarea>
+
+    <div class="mm-modal-actions">
+      <button class="btn" onclick="mmModalCancel()">Отмена</button>
+      <button class="btn btn-primary" onclick="mmModalSave()">Сохранить</button>
+    </div>
+  </div>
+</div>
+<input id="mm-photo-input" type="file" accept="image/*" multiple style="display:none;" />
 </body>
 </html>
