@@ -4,7 +4,7 @@ from urllib.parse import urlparse, urlunparse
 
 BUCKET = os.getenv("S3_BUCKET", "memorymap-media")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
-S3_PUBLIC_ENDPOINT = os.getenv("S3_PUBLIC_ENDPOINT")  # например http://localhost:9000
+S3_PUBLIC_ENDPOINT = os.getenv("S3_PUBLIC_ENDPOINT")
 
 def s3_client():
     return boto3.client(

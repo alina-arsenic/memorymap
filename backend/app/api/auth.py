@@ -16,22 +16,22 @@ class RegisterReq(BaseModel):
 
 @router.post("/auth/register")
 def register(req: RegisterReq, db: Session = Depends(get_db)):
-    # 1. нормализуем логин
+    # нормализуем логин
     login = (req.login or "").strip()
     if not login:
         raise HTTPException(status_code=400, detail="empty_login")
 
-    # 2. проверяем пароль
+    # проверяем пароль
     password = req.password or ""
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="password_too_short")
 
-    # 3. проверка уникальности логина
+    # проверка уникальности логина
     exists = db.query(User).filter(User.login == login).first()
     if exists:
         raise HTTPException(status_code=409, detail="login_taken")
 
-    # 4. создаём пользователя
+    # создаем пользователя
     user = User(
         login=login,
         password_hash=hash_password(password),

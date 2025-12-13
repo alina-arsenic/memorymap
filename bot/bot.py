@@ -1,6 +1,8 @@
-import os, asyncio, logging, requests
+import os, asyncio, logging, requests, socket
+from aiohttp import TCPConnector
 from urllib.parse import urlparse, urlunparse
 from aiogram import Bot, Dispatcher, F, types
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -12,7 +14,10 @@ BOT_API_SECRET = os.getenv("BOT_API_SECRET", "")
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=BOT_TOKEN)
+session = AiohttpSession()
+
+bot = Bot(token=BOT_TOKEN, session=session)
+
 dp = Dispatcher(storage=MemoryStorage())
 
 
@@ -50,7 +55,7 @@ async def show_menu(chat_id: int, state: FSMContext, text: str):
         try:
             await bot.delete_message(chat_id=chat_id, message_id=old_id)
         except Exception:
-            # уже удалено / старое – игнорируем
+            # уже удалено / старое - игнорируем
             pass
 
     msg = await bot.send_message(
@@ -60,7 +65,7 @@ async def show_menu(chat_id: int, state: FSMContext, text: str):
     )
 
     await state.update_data(menu_message_id=msg.message_id)
-    # выходим в "нейтральное" состояние
+    # выходим в нейтральное состояние
     await state.set_state(None)
 
 
@@ -142,7 +147,7 @@ async def on_location(m: types.Message, state: FSMContext):
 
     pid = r.json().get("id")
 
-    # сбрасываем всё старое, начинаем новый сеанс редактирования точки
+    # начинаем новый сеанс редактирования точки
     await state.clear()
     await state.update_data(point_id=pid)
 
@@ -201,7 +206,7 @@ async def cb_back(c: types.CallbackQuery, state: FSMContext):
         state=state,
         text="Редактирование точки. Выберите действие:"
     )
-    await c.answer()  # чтобы убрать "часики" у кнопки
+    await c.answer()
 
 
 # ---------- Title ----------
@@ -210,13 +215,17 @@ async def set_title(m: types.Message, state: FSMContext):
     data = await state.get_data()
     pid = data["point_id"]
 
-    requests.patch(f"{API_BASE}/v1/places/{pid}", json={"title": m.text})
-
-    await show_menu(
-        chat_id=m.chat.id,
-        state=state,
-        text="Название обновлено. Что дальше сделать с этой точкой?"
+    r = requests.patch(
+        f"{API_BASE}/v1/bot/places/{pid}",
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        json={"title": m.text},
+        timeout=10,
     )
+    if not r.ok:
+        await m.reply(f"Не удалось обновить название (код {r.status_code}).")
+        return
+
+    await show_menu(chat_id=m.chat.id, state=state, text="Название обновлено. Что дальше сделать с этой точкой?")
 
 
 @dp.message(AddPoint.waiting_title)
@@ -229,13 +238,17 @@ async def set_note(m: types.Message, state: FSMContext):
     data = await state.get_data()
     pid = data["point_id"]
 
-    requests.patch(f"{API_BASE}/v1/places/{pid}", json={"note": m.text})
-
-    await show_menu(
-        chat_id=m.chat.id,
-        state=state,
-        text="Описание обновлено. Что дальше сделать с этой точкой?"
+    r = requests.patch(
+        f"{API_BASE}/v1/bot/places/{pid}",
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        json={"note": m.text},
+        timeout=10,
     )
+    if not r.ok:
+        await m.reply(f"Не удалось обновить описание (код {r.status_code}).")
+        return
+
+    await show_menu(chat_id=m.chat.id, state=state, text="Описание обновлено. Что дальше сделать с этой точкой?")
 
 
 @dp.message(AddPoint.waiting_note)
@@ -253,7 +266,7 @@ async def add_photo(m: types.Message, state: FSMContext):
     f = await bot.get_file(file_id)
     file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f.file_path}"
 
-    # 1. просим backend выдать presigned URL с учётом лимита
+    # 1. просим backend выдать presigned URL с учетом лимита
     u = requests.post(
         f"{API_BASE}/v1/bot/media/presign-upload",
         headers={"X-Bot-Secret": BOT_API_SECRET},
@@ -272,23 +285,31 @@ async def add_photo(m: types.Message, state: FSMContext):
     public_url = data_u["url"]
     temp_key = data_u["key"]
 
-    # 2. внутренний URL для MinIO
+    # внутренний URL для MinIO
     parsed = urlparse(public_url)
     internal_url = urlunparse(parsed._replace(netloc="minio:9000"))
 
-    # 3. качаем фото из Telegram
+    # качаем фото из Telegram
     img = requests.get(file_url).content
 
-    # 4. кладем в MinIO
+    # кладем в MinIO
     r = requests.put(internal_url, data=img, headers={"Content-Type": "image/jpeg"})
     if not r.ok:
         await m.reply("Ошибка загрузки фото в хранилище.")
         return
 
-    # 5. привязываем temp_key к точке
-    requests.post(f"{API_BASE}/v1/places/{pid}/media", json={"temp_key": temp_key})
+    # привязываем temp_key к точке
+    link = requests.post(
+        f"{API_BASE}/v1/bot/places/{pid}/media",
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        json={"temp_key": temp_key},
+        timeout=10,
+    )
+    if not link.ok:
+        await m.reply(f"Фото загрузилось, но не удалось привязать к точке (код {link.status_code}).")
+        return
 
-    # просто подтверждаем, остаёмся в режиме ожидания фото
+    # просто подтверждаем, остаемся в режиме ожидания фото
     await m.reply("Фото добавлено.")
 
 
@@ -302,14 +323,14 @@ async def fallback_message(m: types.Message, state: FSMContext):
     data = await state.get_data()
     pid = data.get("point_id")
 
-    # если активной точки ещё нет – просим сначала геолокацию
+    # если активной точки ещё нет - просим сначала геолокацию
     if not pid:
-        # не трогаем /whoami и локацию, они уже обрабатываются выше
+        # не трогаем /whoami и локацию, они обрабатываются выше
         if not m.location and m.text not in ("/start", "/whoami"):
             await m.reply("Сначала отправьте геолокацию - я создам точку и покажу меню.")
         return
 
-    # точка есть, но пользователь пишет "что-то ещё", а не по шагам
+    # точка есть, но пользователь пишет лажу
     await m.reply("Сейчас можно пользоваться меню под последним сообщением бота.")
 
 

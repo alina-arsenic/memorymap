@@ -51,7 +51,7 @@ def bot_link_telegram(
     row.used_at = now
     db.commit()
 
-    # личная группа (чтобы логика была одинаковой как в tg-флоу)
+    # личная группа
     _ensure_personal_group(db, user)
     db.commit()
 

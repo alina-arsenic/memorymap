@@ -1,31 +1,145 @@
-# MemoryMap — PoC/MVP Starter
+# MemoryMap
 
-Прототип: FastAPI + Postgres/PostGIS + Redis + MinIO (S3) + Telegram bot + карта (MapLibre).
+**MemoryMap** - веб-приложение и Telegram-бот для хранения значимых мест на карте: с заметками, фотографиями и привязкой к аккаунту.
 
-## Запуск
-```
+Проект позволяет:
+- добавлять точки на карте через веб-интерфейс и Telegram-бота;
+- прикреплять фотографии (S3/MinIO);
+- редактировать названия и описания;
+- управлять доступом через авторизацию;
+- привязывать Telegram-аккаунт к профилю.
+
+---
+
+## Возможности
+
+### Пользователи и авторизация
+- Регистрация по логину и паролю (пароль хранится в хеше, min 8 символов).
+- Вход / выход, JWT access-token.
+- Получение текущего пользователя (`/v1/me`).
+- Привязка Telegram-аккаунта через одноразовый код.
+
+### Работа с картой
+- Просмотр публичных и своих точек.
+- Добавление точки кликом правой кнопкой мыши.
+- Автогенерация названия по координатам, если оно пустое.
+- Редактирование названия и заметки (через UI с модальным окном).
+- Удаление своих точек.
+
+### Медиа (фото)
+- До **12 фотографий на одну точку**.
+- Загрузка через presigned URL (MinIO / S3).
+- Добавление фото к существующей точке.
+- Удаление фотографий.
+- Просмотр фото в полноэкранном режиме.
+
+### Telegram-бот
+- Добавление точек отправкой геолокации.
+- Привязка Telegram ID к аккаунту.
+- Безопасное взаимодействие с API через `X-Bot-Secret`.
+
+---
+
+## Стек
+
+**Backend**
+- Python 3.11
+- FastAPI
+- SQLAlchemy
+- PostgreSQL + PostGIS
+- Redis
+- MinIO (S3-совместимое хранилище)
+- JWT (access token)
+- passlib / bcrypt
+
+**Frontend**
+- Vanilla JS
+- MapLibre GL
+- HTML + CSS
+
+**Инфраструктура**
+- Docker
+- Docker Compose
+
+---
+
+## Запуск проекта
+
+### 1. Подготовка окружения
+
+```bash
 cp .env.example .env
-# Укажите TELEGRAM_BOT_TOKEN.
+# Укажите TELEGRAM_BOT_TOKEN и BOT_API_SECRET
+```
+
+### 2. Запуск
+
+```bash
 docker compose up -d --build
 ```
 
-- API/Frontend: http://localhost:8000
-- MinIO console: http://localhost:9001 (minioadmin/minioadmin)
-- Postgres: localhost:5432
-- Redis: localhost:6379
+После запуска:
+- Web UI: http://localhost:8000
+- MinIO Console: http://localhost:9001
+- PostgreSQL: localhost:5432
 
-### Создайте бакет
-В MinIO Console создайте bucket `memorymap-media` (если не создан).
+---
 
-### Проверка
-1. Откройте http://localhost:8000 - карта Москвы.
-2. Откройте бот `@memorymap_bot`
-2. Отправьте боту **геолокацию** - появится точка.
-3. Отправьте боту **фото** - загрузится в S3 по presigned PUT.
+## Структура проекта
 
-## Эндпойнты
-- `GET /healthz`
-- `POST /v1/media/presign-upload {mime, ext?}` → `{key, url}`
-- `GET /v1/media/presign-download?key=...`
-- `POST /v1/places {group_id, lat, lon, title?, note?}`
-- `GET /v1/places?group_id=1&bbox=left,bottom,right,top`
+```
+memorymap/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── auth.py          # регистрация, логин, JWT
+│   │   │   ├── me.py            # текущий пользователь, Telegram link
+│   │   │   ├── places.py        # точки (CRUD, bot endpoint)
+│   │   │   ├── media.py         # presign upload, удаление фото
+│   │   │   ├── groups.py        # группы
+│   │   │   └── bot_places.py
+│   │   ├── core/
+│   │   │   ├── config.py        # настройки
+│   │   │   ├── security.py      # JWT, пароли
+│   │   │   └── deps.py
+│   │   ├── models/
+│   │   ├── services/
+│   │   ├── db.py
+│   │   └── main.py
+│   ├── Dockerfile
+│   └── requirements.txt
+│
+├── bot/
+│   ├── bot.py
+│   └── Dockerfile
+│
+├── frontend/
+│   ├── index.html
+│   ├── app.js
+│   └── styles.css
+│
+├── scripts/
+│   └── init.sql
+│
+├── docker-compose.yml
+├── .env.example
+└── README.md
+```
+
+---
+
+## Безопасность и ограничения
+
+- Пароли хранятся только в виде хеша.
+- JWT access token с ограниченным сроком жизни.
+- Медиа-операции защищены авторизацией.
+- Telegram-бот общается с API только через `X-Bot-Secret`.
+- Лимит: **12 фото на точку** (проверяется и на фронте, и на бэке).
+
+---
+
+## Статус проекта
+
+**Prototype**
+
+Проект готов к дальнейшему развитию и UX-доработкам.

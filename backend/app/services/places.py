@@ -111,5 +111,4 @@ class PlaceService:
 
     @staticmethod
     def add_media_to_place(db: Session, place_id: int) -> None:
-        # хелпер на случай если будешь расширять — пока не нужен
         pass

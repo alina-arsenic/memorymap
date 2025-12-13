@@ -122,7 +122,7 @@ def update_place(
         raw = "" if raw is None else str(raw)
         title = raw.strip()
         if not title:
-            # правило: пусто => координаты
+            # пусто, значит координаты
             title = f"{place.lat:.5f}, {place.lon:.5f}"
         place.title = title
 

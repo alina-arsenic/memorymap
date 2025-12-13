@@ -2,25 +2,39 @@ const API_BASE = ""; // тот же origin (http://localhost:8000)
 const LS_TOKEN = "mm_token";
 
 let accessToken = null;
-let currentUser = null; // объект из /v1/me
-let currentMarkers = [];       // ссылки на Marker, чтобы их удалять
+let currentUser = null;  // объект из /v1/me
+let currentMarkers = []; // ссылки на Marker, чтобы их удалять
 
-let tempMarker = null; // временный жёлтый маркер
+let tempMarker = null; // временный желтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
 
 async function apiFetch(path, { method = "GET", headers = {}, body = null } = {}) {
   const h = { ...headers };
   if (accessToken) h["Authorization"] = "Bearer " + accessToken;
-  const resp = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: h,
-    body,
-  });
+
+  const resp = await fetch(`${API_BASE}${path}`, { method, headers: h, body });
+
+  // если токен протух/невалидный - сразу разлогиниваемся
+  if (resp.status === 401) {
+    accessToken = null;
+    currentUser = null;
+    localStorage.removeItem(LS_TOKEN);
+
+    // UI гость
+    const userTitle = document.getElementById("user-title");
+    if (userTitle) userTitle.innerText = "Пользователь";
+    applyAuthUI(false);
+
+    // на всякий: убираем временный маркер
+    if (tempMarker) { tempMarker.remove(); tempMarker = null; }
+    tempCoords = null;
+  }
+
   return resp;
 }
 
 function createPin(isMine, overrideColor) {
-const color = overrideColor || (isMine ? "#10b981" : "#3b82f6"); // зелёный свои, синий чужие
+const color = overrideColor || (isMine ? "#10b981" : "#3b82f6"); // зеленый свои, синий чужие
 
 const svg = `
     <svg width="20" height="35" viewBox="0 0 26 40" xmlns="http://www.w3.org/2000/svg">
@@ -116,7 +130,7 @@ async function loadMe() {
   const tgStatus = document.getElementById("tg-status");
   const tgCode = document.getElementById("tg-link-code");
 
-  // если токена нет — сразу UI в "гость"
+  // если токена нет - сразу UI в гостя
   if (!accessToken) {
     currentUser = null;
     if (userTitle) userTitle.innerText = "Пользователь";
@@ -237,10 +251,10 @@ function uiLogout() {
   const userTitle = document.getElementById("user-title");
   if (userTitle) userTitle.innerText = "Пользователь";
 
-  // UI в "гость"
+  // UI гость
   applyAuthUI(false);
 
-  // tg блоки спрячем
+  // tg блоки прячем
   const tgBtn = document.getElementById("tg-link-btn");
   const tgHint = document.getElementById("tg-hint");
   const tgStatus = document.getElementById("tg-status");
@@ -295,7 +309,7 @@ async function startTelegramLink() {
     const data = await resp.json();
     if (tgCode) tgCode.innerText = `Отправьте боту:\n/link ${data.code}`;
 
-    // ждём привязку (без перезагрузки страницы)
+    // ждем привязку
     let attempts = 30;
     const timer = setInterval(async () => {
       attempts--;
@@ -434,7 +448,7 @@ for (const file of files) {
     : "";
     const mime = file.type || "image/jpeg";
 
-    // 1) просим пресайн для загрузки
+    // просим пресайн для загрузки
     const presignResp = await apiFetch("/v1/media/presign-upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -445,7 +459,7 @@ for (const file of files) {
     }
     const u = await presignResp.json(); // { key, url, expires_in }
 
-    // 2) заливаем файл в MinIO
+    // заливаем файл в MinIO
     const putResp = await fetch(u.url, {
       method: "PUT",
       headers: { "Content-Type": mime },
@@ -552,8 +566,8 @@ if (tempMarker) {
     tempMarker = null;
 }
 
-// жёлтый пин
-const el = createPin(false, "#facc15"); // жёлтый цвет
+// желтый пин
+const el = createPin(false, "#facc15");
 
 tempMarker = new maplibregl.Marker({ element: el, anchor: "bottom" })
     .setLngLat([tempCoords.lng, tempCoords.lat])
@@ -561,7 +575,9 @@ tempMarker = new maplibregl.Marker({ element: el, anchor: "bottom" })
 
 const status = document.getElementById("web-add-status");
 if (status) {
-    status.innerText = "Временная точка выбрана.";
+  status.innerText = "Временная точка выбрана.";
+  status.style.color = "#52525b";
+  status.style.fontWeight = "400";
 }
 }
 
@@ -670,7 +686,7 @@ async function refresh() {
 
       const initialNote = p.note || "";
 
-      // очень важно: экранируем кавычки, иначе атрибут data-initial сломается
+      // экранируем кавычки
       const esc = (s) => String(s).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
       const titleBlock = p.isMine

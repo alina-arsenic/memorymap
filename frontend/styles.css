@@ -188,7 +188,6 @@ html, body {
     color: #374151;
 }
 
-/* Ограничиваем попап по размеру и даём скролл */
 .maplibregl-popup-content {
     max-width: 350px;
 }
@@ -205,8 +204,8 @@ html, body {
 }
 
 .mm-popup-note {
-    white-space: pre-wrap;     /* сохраняет переносы строк */
-    overflow-wrap: anywhere;   /* ломает длинные слова/ссылки */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     line-height: 1.25;
 }
 
