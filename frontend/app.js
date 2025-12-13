@@ -35,58 +35,105 @@ wrapper.innerHTML = svg.trim();
 return wrapper.firstChild; // сам <svg>
 }
 
+function applyAuthUI(isAuthed) {
+  const authForm = document.getElementById("auth-form");
+  const logoutBtn = document.getElementById("logout-btn");
+  const authedOnly = document.getElementById("authed-only");
+
+  if (authForm) authForm.style.display = isAuthed ? "none" : "";
+  if (logoutBtn) logoutBtn.style.display = isAuthed ? "" : "none";
+  if (authedOnly) authedOnly.style.display = isAuthed ? "" : "none";
+
+  const tgBtn = document.getElementById("tg-link-btn");
+  const tgHint = document.getElementById("tg-hint");
+  const tgStatus = document.getElementById("tg-status");
+  const tgCode = document.getElementById("tg-link-code");
+
+  // ВАЖНО: по умолчанию скрываем tg-блоки всегда.
+  // loadMe() потом включит их, если надо.
+  if (tgBtn) tgBtn.style.display = "none";
+  if (tgHint) tgHint.style.display = "none";
+  if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
+
+  if (!isAuthed) {
+    if (tgStatus) tgStatus.innerText = "";
+  }
+}
+
 async function initAuthFromStorage() {
+  applyAuthUI(false);
+
   const saved = localStorage.getItem(LS_TOKEN);
   if (!saved) return;
+
   accessToken = saved;
-  await loadMe(); // если токен протух — сбросим ниже
+  await loadMe();
 }
 
 async function loadMe() {
-  const info = document.getElementById("user-info");
-  const authForm = document.getElementById("auth-form");
+  const userTitle = document.getElementById("user-title");
   const tgBtn = document.getElementById("tg-link-btn");
-  const tgEl = document.getElementById("tg-link-code");
+  const tgHint = document.getElementById("tg-hint");
+  const tgStatus = document.getElementById("tg-status");
+  const tgCode = document.getElementById("tg-link-code");
+
+  // если токена нет — сразу UI в "гость"
+  if (!accessToken) {
+    currentUser = null;
+    if (userTitle) userTitle.innerText = "Пользователь";
+    applyAuthUI(false);
+
+    if (tgStatus) tgStatus.innerText = "";
+    if (tgHint) tgHint.style.display = "none";
+    if (tgBtn) tgBtn.style.display = "none";
+    if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
+    return;
+  }
 
   const resp = await apiFetch("/v1/me");
 
-  // НЕ АВТОРИЗОВАНЫ / ТОКЕН ПРОТУХ
+  // токен протух / невалиден
   if (!resp.ok) {
     accessToken = null;
     currentUser = null;
     localStorage.removeItem(LS_TOKEN);
 
-    if (info) info.innerText = "Не авторизованы";
-    if (authForm) authForm.style.display = ""; // показываем форму
+    if (userTitle) userTitle.innerText = "Пользователь";
+    applyAuthUI(false);
+
+    if (tgStatus) tgStatus.innerText = "";
+    if (tgHint) tgHint.style.display = "none";
     if (tgBtn) tgBtn.style.display = "none";
-    if (tgEl) tgEl.innerText = "";
+    if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
     return;
   }
 
-  // УСПЕШНО
+  // успех
   currentUser = await resp.json();
-
   const nick = currentUser.login || ("user#" + currentUser.id);
-  if (info) {
-    info.innerText = `Вы вошли как ${nick}`;
-  }
 
-  // прячем форму логина/регистрации
-  if (authForm) authForm.style.display = "none";
+  if (userTitle) userTitle.innerText = `Привет, ${nick}!`;
+  applyAuthUI(true);
 
-  // Telegram статус
+  // Telegram UI
   if (currentUser.tg_id) {
+    if (tgStatus) tgStatus.innerText = `Привязан Telegram ID: ${currentUser.tg_id}`;
     if (tgBtn) tgBtn.style.display = "none";
-    if (tgEl) tgEl.innerText = `Привязан Telegram ID: ${currentUser.tg_id}`;
+    if (tgHint) tgHint.style.display = "none";
+    if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
   } else {
+    if (tgStatus) tgStatus.innerText = "Telegram не привязан.";
     if (tgBtn) tgBtn.style.display = "";
-    if (tgEl) tgEl.innerText = "Telegram не привязан.";
+    if (tgHint) tgHint.style.display = "";
+    // код показываем только после генерации
+    if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
   }
 }
 
 async function uiLogin() {
-  const login = document.getElementById("login-input").value.trim();
-  const password = document.getElementById("password-input").value;
+  const login = (document.getElementById("login-input").value || "").trim();
+  const password = document.getElementById("password-input").value || "";
+
   if (!login || !password) {
     alert("Введите логин и пароль.");
     return;
@@ -112,8 +159,9 @@ async function uiLogin() {
 }
 
 async function uiRegister() {
-  const login = document.getElementById("login-input").value.trim();
-  const password = document.getElementById("password-input").value;
+  const login = (document.getElementById("login-input").value || "").trim();
+  const password = document.getElementById("password-input").value || "";
+
   if (!login || !password) {
     alert("Введите логин и пароль.");
     return;
@@ -139,17 +187,46 @@ async function uiRegister() {
 }
 
 function uiLogout() {
-  // 1. убрать токен и пользователя
   accessToken = null;
   currentUser = null;
   localStorage.removeItem(LS_TOKEN);
 
-  // 2. показать форму логина
-  const authForm = document.getElementById("auth-form");
-  if (authForm) authForm.style.display = "";
+  // вернуть верхнюю надпись
+  const userTitle = document.getElementById("user-title");
+  if (userTitle) userTitle.innerText = "Пользователь";
 
-  // 3. обновить UI (user-info, tg-блоки и т.д.)
-  loadMe();
+  // UI в "гость"
+  applyAuthUI(false);
+
+  // tg блоки спрячем
+  const tgBtn = document.getElementById("tg-link-btn");
+  const tgHint = document.getElementById("tg-hint");
+  const tgStatus = document.getElementById("tg-status");
+  const tgCode = document.getElementById("tg-link-code");
+  if (tgBtn) tgBtn.style.display = "none";
+  if (tgHint) tgHint.style.display = "none";
+  if (tgStatus) tgStatus.innerText = "";
+  if (tgCode) tgCode.innerText = "";
+
+  const loginInput = document.getElementById("login-input");
+  const passInput = document.getElementById("password-input");
+  if (loginInput) loginInput.value = "";
+  if (passInput) passInput.value = "";
+
+  // убрать временный маркер и сбросить координаты
+  if (tempMarker) {
+    tempMarker.remove();
+    tempMarker = null;
+  }
+  tempCoords = null;
+
+  const coordsEl = document.getElementById("web-coords");
+  if (coordsEl) coordsEl.textContent = "ПКМ по карте, чтобы выбрать точку.";
+
+  const statusEl = document.getElementById("web-add-status");
+  if (statusEl) statusEl.innerText = "Сначала войдите, чтобы добавлять точки.";
+
+  refresh();
 }
 
 async function startTelegramLink() {
@@ -157,15 +234,26 @@ async function startTelegramLink() {
     alert("Сначала войдите.");
     return;
   }
-  const el = document.getElementById("tg-link-code");
-  el.innerText = "Генерирую код...";
+
+  const tgCode = document.getElementById("tg-link-code");
+  if (tgCode) tgCode.innerText = "Генерирую код...";
+
   const resp = await apiFetch("/v1/me/telegram-link/start", { method: "POST" });
   if (!resp.ok) {
-    el.innerText = "Ошибка генерации кода.";
+    if (tgCode) tgCode.innerText = "Ошибка генерации кода.";
     return;
   }
+
   const data = await resp.json();
-  el.innerText = `Код: ${data.code}. Отправьте боту: /link ${data.code}`;
+  if (tgCode) tgCode.innerText = `Код: ${data.code}. Отправьте боту: /link ${data.code}`;
+
+  // ждём привязку (без перезагрузки страницы)
+  let attempts = 30;
+  const timer = setInterval(async () => {
+    attempts--;
+    await loadMe();
+    if (currentUser?.tg_id || attempts <= 0) clearInterval(timer);
+  }, 2000);
 }
 
 function fakeLogin() {
@@ -203,9 +291,14 @@ const titleInput = document.getElementById("web-title");
 const noteInput = document.getElementById("web-note");
 const photosInput = document.getElementById("web-photos");
 
-const title = titleInput ? titleInput.value.trim() : "";
+const titleRaw = titleInput ? titleInput.value : "";
 const note = noteInput ? noteInput.value.trim() : "";
 const files = photosInput && photosInput.files ? Array.from(photosInput.files) : [];
+
+let titleFinal = (titleRaw || "").trim();
+if (!titleFinal) {
+  titleFinal = `${tempCoords.lat.toFixed(5)}, ${tempCoords.lng.toFixed(5)}`;
+}
 
 if (files.length > 12) {
     if (statusEl) {
@@ -237,12 +330,12 @@ if (files.length > 0) {
 }
 
 const body = {
-    group_id: 1,
-    title: title || null,
-    note: note,
-    lat: tempCoords.lat,
-    lon: tempCoords.lng,
-    media_keys: mediaKeys,
+  group_id: 1,
+  title: titleFinal,
+  note: note,
+  lat: tempCoords.lat,
+  lon: tempCoords.lng,
+  media_keys: mediaKeys,
 };
 
 try {
@@ -375,10 +468,18 @@ zoom: 10
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 
 map.on("contextmenu", (e) => {
-if (e.originalEvent && e.originalEvent.preventDefault) {
-    e.originalEvent.preventDefault(); // убираем контекстное меню браузера
-}
-setTempMarker(e.lngLat);
+  if (e.originalEvent && e.originalEvent.preventDefault) {
+    e.originalEvent.preventDefault();
+  }
+
+  // запрет до входа
+  if (!currentUser) {
+    const statusEl = document.getElementById("web-add-status");
+    if (statusEl) statusEl.innerText = "Сначала войдите, чтобы добавлять точки.";
+    return;
+  }
+
+  setTempMarker(e.lngLat);
 });
 
 function clearMarkers() {
@@ -514,14 +615,28 @@ filtered.forEach(p => {
     photosHtml = `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${thumbs}</div>`;
     }
 
+    const titleBlock = p.isMine
+      ? `<div class="mm-edit-row">
+          <div class="mm-popup-title">${displayTitle}</div>
+          <button class="mm-edit-btn" data-id="${p.id}" data-field="title" title="Редактировать">✎</button>
+        </div>`
+      : `<div class="mm-popup-title">${displayTitle}</div>`;
+
+    const noteBlock = p.isMine
+      ? `<div class="mm-edit-row">
+          <div class="mm-popup-note">${p.note || ""}</div>
+          <button class="mm-edit-btn" data-id="${p.id}" data-field="note" title="Редактировать">✎</button>
+        </div>`
+      : `<div class="mm-popup-note">${p.note || ""}</div>`;
+
     const popupHtml = `
-    <div class="mm-popup">
-        <div class="mm-popup-title">${displayTitle}</div>
-        <div class="mm-popup-note">${p.note || ""}</div>
+      <div class="mm-popup">
+        ${titleBlock}
+        ${noteBlock}
         <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
         ${deleteButtonHtml}
         ${photosHtml}
-    </div>
+      </div>
     `;
 
     const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
@@ -537,44 +652,77 @@ setStatus("Подключено к API", false);
 }
 
 document.addEventListener("click", async (e) => {
-const btn = e.target;
-if (!btn.classList.contains("mm-delete-btn")) return;
+  const btn = e.target;
+  if (!btn.classList.contains("mm-delete-btn")) return;
 
-const id = btn.getAttribute("data-id");
-if (!id) return;
+  const id = btn.getAttribute("data-id");
+  if (!id) return;
 
-// подтверждение
-const confirmDelete = confirm("Удалить эту точку?");
-if (!confirmDelete) return;
+  // подтверждение
+  const confirmDelete = confirm("Удалить эту точку?");
+  if (!confirmDelete) return;
 
-if (!accessToken) {
-    alert("Нужно авторизоваться, чтобы удалять точки.");
+  if (!accessToken) {
+      alert("Нужно авторизоваться, чтобы удалять точки.");
+      return;
+  }
+
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Удаление...";
+
+  try {
+      const resp = await apiFetch(`/v1/places/${id}`, { method: "DELETE" });
+
+      if (!resp.ok) {
+      console.error("Delete failed", resp.status);
+      alert("Не удалось удалить точку (код " + resp.status + ").");
+      btn.disabled = false;
+      btn.textContent = originalText;
+      return;
+      }
+
+      // обновляем карту
+      refresh();
+  } catch (err) {
+      console.error(err);
+      alert("Ошибка соединения при удалении точки.");
+      btn.disabled = false;
+      btn.textContent = originalText;
+  }
+});
+
+document.addEventListener("click", async (e) => {
+  const btn = e.target;
+  if (!btn.classList || !btn.classList.contains("mm-edit-btn")) return;
+
+  const id = btn.getAttribute("data-id");
+  const field = btn.getAttribute("data-field");
+  if (!id || !field) return;
+
+  if (!accessToken) {
+    alert("Нужно войти.");
     return;
-}
+  }
 
-btn.disabled = true;
-const originalText = btn.textContent;
-btn.textContent = "Удаление...";
+  const next = prompt(field === "title" ? "Новое название:" : "Новая заметка:");
+  if (next === null) return;
 
-try {
-    const resp = await apiFetch(`/v1/places/${id}`, { method: "DELETE" });
+  const payload = {};
+  payload[field] = next;
 
-    if (!resp.ok) {
-    console.error("Delete failed", resp.status);
-    alert("Не удалось удалить точку (код " + resp.status + ").");
-    btn.disabled = false;
-    btn.textContent = originalText;
+  const resp = await apiFetch(`/v1/places/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok) {
+    alert("Не удалось сохранить (код " + resp.status + ")");
     return;
-    }
+  }
 
-    // обновляем карту
-    refresh();
-} catch (err) {
-    console.error(err);
-    alert("Ошибка соединения при удалении точки.");
-    btn.disabled = false;
-    btn.textContent = originalText;
-}
+  refresh();
 });
 
 // Открытие фото в полноразмерном режиме

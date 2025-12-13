@@ -19,40 +19,45 @@
     </div>
 
     <div class="card">
-      <div class="sidebar-section-title">Пользователь</div>
+    <div class="sidebar-section-title" id="user-title">Пользователь</div>
 
-      <!-- СКРЫВАЕМЫЙ БЛОК -->
-      <div id="auth-form">
-        <div class="field-label">Логин</div>
-        <input id="login-input" class="input" placeholder="" />
+    <!-- ФОРМА ЛОГИНА (скрывается после входа) -->
+    <div id="auth-form">
+      <div class="field-label">Логин</div>
+      <input id="login-input" class="input" />
 
-        <div class="field-label" style="margin-top:6px;">Пароль</div>
-        <input id="password-input" type="password" class="input" placeholder="" />
+      <div class="field-label" style="margin-top:6px;">Пароль</div>
+      <input id="password-input" type="password" class="input" />
 
-        <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
-          <button class="btn btn-primary" onclick="uiLogin()">Войти</button>
-          <button class="btn" onclick="uiRegister()">Регистрация</button>
-        </div>
+      <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="uiLogin()">Войти</button>
+        <button class="btn" onclick="uiRegister()">Регистрация</button>
       </div>
-      <!-- /СКРЫВАЕМЫЙ БЛОК -->
-
-      <div style="margin-top:6px; display:flex; gap:6px;">
-        <button class="btn" onclick="uiLogout()">Выйти</button>
-      </div>
-
-      <div id="user-info" class="hint" style="margin-top:6px;">Не авторизованы</div>
-
-      <div class="hint" style="margin-top:8px;">
-        Чтобы бот слал точки в ваш аккаунт: после входа сгенерируйте код привязки и отправьте боту команду <b>/link &lt;code&gt;</b>.
-      </div>
-
-      <button id="tg-link-btn" class="btn" style="margin-top:6px;" onclick="startTelegramLink()">
-        Сгенерировать код привязки Telegram
-      </button>
-
-      <div id="tg-link-code" class="hint" style="margin-top:6px;"></div>
     </div>
 
+    <!-- КНОПКА ВЫХОДА (видна только когда вошли) -->
+    <div style="margin-top:6px;">
+      <button id="logout-btn" class="btn" onclick="uiLogout()" style="display:none;">Выйти</button>
+    </div>
+
+    <!-- ТУТ МЫ БУДЕМ ПИСАТЬ СТАТУС Telegram -->
+    <div id="tg-status" class="hint" style="margin-top:8px;"></div>
+
+    <!-- ПОДСКАЗКА про бота (скрываем, когда tg уже привязан) -->
+    <div id="tg-hint" class="hint" style="margin-top:8px; display:none;">
+      Чтобы бот слал точки в ваш аккаунт: после входа сгенерируйте код привязки и отправьте боту команду <b>/link &lt;code&gt;</b>.
+    </div>
+
+    <!-- КНОПКА генерации кода (скрываем, когда tg уже привязан) -->
+    <button id="tg-link-btn" class="btn" style="margin-top:6px; display:none;" onclick="startTelegramLink()">
+      Сгенерировать код привязки Telegram
+    </button>
+
+    <div id="tg-link-code" class="hint" style="margin-top:6px; display:none;"></div>
+  </div>
+
+  <div id="authed-only" style="display:none;">
+  <!-- card "Слои" -->
     <div class="card">
       <div class="sidebar-section-title">Слои</div>
       <div class="layers-list">
@@ -100,6 +105,7 @@
       <div class="hint" style="margin-top:8px;">
         Также можно добавить точку, отправив геолокацию боту <b>@memorymap_bot</b>.
       </div>
+    </div>
     </div>
   </aside>
 

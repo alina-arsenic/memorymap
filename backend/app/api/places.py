@@ -100,15 +100,36 @@ def create_place_bot(
         raise
 
 @router.patch("/places/{place_id}")
-def update_place(place_id: int, payload: dict = Body(...), db: Session = Depends(get_db)):
+def update_place(
+    place_id: int,
+    payload: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     place = db.query(Place).filter(Place.id == place_id).one_or_none()
     if not place:
-        raise HTTPException(404, "Not found")
+        raise HTTPException(status_code=404, detail="Not found")
+
+    # owner-check
+    if place.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     if "title" in payload:
-        place.title = payload["title"]
+        raw = payload["title"]
+        raw = "" if raw is None else str(raw)
+        title = raw.strip()
+        if not title:
+            # правило: пусто => координаты
+            title = f"{place.lat:.5f}, {place.lon:.5f}"
+        place.title = title
+
     if "note" in payload:
-        place.note = payload["note"]
+        raw = payload["note"]
+        raw = "" if raw is None else str(raw)
+        place.note = raw  # note можно пустым
 
     db.commit()
     return {"status": "ok"}
