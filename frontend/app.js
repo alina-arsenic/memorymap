@@ -4,6 +4,8 @@ const LS_TOKEN = "mm_token";
 let accessToken = null;
 let currentUser = null;  // объект из /v1/me
 let currentMarkers = []; // ссылки на Marker, чтобы их удалять
+let markersByPlaceId = {}; // {place_id: Marker} — для открытия попапа из панели модерации
+let pendingPopupPlaceId = null; // placeId для открытия попапа после refresh
 
 let tempMarker = null; // временный желтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
@@ -165,7 +167,10 @@ async function loadMe() {
   currentUser = await resp.json();
   const nick = currentUser.login || ("user#" + currentUser.id);
 
-  if (userTitle) userTitle.innerText = `Привет, ${nick}!`;
+  // показываем роль для admin и moderator
+  const roleBadge = currentUser.role === "admin" ? " (Админ)"
+    : currentUser.role === "moderator" ? " (Модератор)" : "";
+  if (userTitle) userTitle.innerText = `Привет, ${nick}!${roleBadge}`;
   applyAuthUI(true);
 
   // Telegram UI
@@ -178,6 +183,22 @@ async function loadMe() {
     if (tgStatus) tgStatus.innerText = "Telegram не привязан.";
     if (tgBtn) tgBtn.style.display = "";
     if (tgHint) tgHint.style.display = "";
+  }
+
+  // Панель модерации — показываем только admin и moderator
+  const modPanel = document.getElementById("moderation-panel");
+  if (modPanel) {
+    const isModerator = currentUser.role === "admin" || currentUser.role === "moderator";
+    modPanel.style.display = isModerator ? "" : "none";
+    if (isModerator) loadModerationQueue();
+  }
+
+  // Панель администратора — показываем только admin
+  const adminPanel = document.getElementById("admin-panel");
+  if (adminPanel) {
+    const isAdmin = currentUser.role === "admin";
+    adminPanel.style.display = isAdmin ? "" : "none";
+    if (isAdmin) loadAdminUsers();
   }
 }
 
@@ -197,7 +218,12 @@ async function uiLogin() {
   });
 
   if (!resp.ok) {
-    alert("Неверный логин или пароль.");
+    const errData = await resp.json().catch(() => ({}));
+    if (resp.status === 403 && errData.detail === "email_not_verified") {
+      alert("Email не подтверждён. Проверьте почту или зарегистрируйтесь заново.");
+    } else {
+      alert("Неверный логин или пароль.");
+    }
     return;
   }
 
@@ -209,12 +235,16 @@ async function uiLogin() {
   refresh();
 }
 
+// email, на который отправлен код (запоминаем для verify/resend)
+let _pendingVerifyEmail = null;
+
 async function uiRegister() {
   const login = (document.getElementById("login-input").value || "").trim();
+  const email = (document.getElementById("email-input").value || "").trim();
   const password = document.getElementById("password-input").value || "";
 
-  if (!login || !password) {
-    alert("Введите логин и пароль.");
+  if (!login || !password || !email) {
+    alert("Заполните логин, email и пароль.");
     return;
   }
 
@@ -226,20 +256,84 @@ async function uiRegister() {
   const resp = await fetch(`${API_BASE}/v1/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login, password }),
+    body: JSON.stringify({ login, password, email }),
   });
 
   if (resp.status === 409) {
-    alert("Логин занят.");
+    const data = await resp.json().catch(() => ({}));
+    if (data.detail === "email_taken") {
+      alert("Этот email уже зарегистрирован.");
+    } else {
+      alert("Логин занят.");
+    }
     return;
   }
   if (!resp.ok) {
-    alert("Ошибка регистрации.");
+    const data = await resp.json().catch(() => ({}));
+    if (data.detail === "invalid_email") {
+      alert("Некорректный формат email.");
+    } else {
+      alert("Ошибка регистрации.");
+    }
     return;
   }
 
-  // сразу логиним
-  await uiLogin();
+  // показываем форму подтверждения email
+  _pendingVerifyEmail = email;
+  document.getElementById("auth-form").style.display = "none";
+  document.getElementById("verify-form").style.display = "";
+  document.getElementById("verify-email-display").innerText = email;
+  document.getElementById("verify-status").innerText = "";
+}
+
+async function uiVerifyEmail() {
+  const code = (document.getElementById("verify-code-input").value || "").trim();
+  const statusEl = document.getElementById("verify-status");
+
+  if (!code || !_pendingVerifyEmail) {
+    statusEl.innerText = "Введите код из письма.";
+    return;
+  }
+
+  const resp = await fetch(`${API_BASE}/v1/auth/verify-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: _pendingVerifyEmail, code }),
+  });
+
+  const data = await resp.json().catch(() => ({}));
+
+  if (!resp.ok) {
+    if (data.detail === "wrong_code") statusEl.innerText = "Неверный код.";
+    else if (data.detail === "code_expired") statusEl.innerText = "Код истёк. Нажмите «Отправить повторно».";
+    else statusEl.innerText = "Ошибка подтверждения.";
+    return;
+  }
+
+  // email подтверждён — скрываем форму верификации, показываем логин
+  _pendingVerifyEmail = null;
+  document.getElementById("verify-form").style.display = "none";
+  document.getElementById("auth-form").style.display = "";
+  document.getElementById("verify-code-input").value = "";
+
+  alert("Email подтверждён! Теперь войдите в аккаунт.");
+}
+
+async function uiResendCode() {
+  const statusEl = document.getElementById("verify-status");
+  if (!_pendingVerifyEmail) { statusEl.innerText = "Нет email."; return; }
+
+  const resp = await fetch(`${API_BASE}/v1/auth/resend-code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: _pendingVerifyEmail }),
+  });
+
+  if (resp.ok) {
+    statusEl.innerText = "Новый код отправлен.";
+  } else {
+    statusEl.innerText = "Не удалось отправить код.";
+  }
 }
 
 function uiLogout() {
@@ -307,7 +401,19 @@ async function startTelegramLink() {
     }
 
     const data = await resp.json();
-    if (tgCode) tgCode.innerText = `Отправьте боту:\n/link ${data.code}`;
+
+    // deep link — кликабельная кнопка-ссылка на бота
+    if (tgCode) {
+      if (data.bot_link) {
+        tgCode.innerHTML =
+          `<a href="${data.bot_link}" target="_blank" class="btn btn-primary" ` +
+          `style="display:inline-block;text-decoration:none;margin-top:4px;">` +
+          `Открыть бота и привязать</a>` +
+          `<div class="hint" style="margin-top:4px;">Или отправьте боту: /link ${data.code}</div>`;
+      } else {
+        tgCode.innerText = `Отправьте боту:\n/link ${data.code}`;
+      }
+    }
 
     // ждем привязку
     let attempts = 30;
@@ -538,6 +644,7 @@ map.on("contextmenu", (e) => {
 function clearMarkers() {
 currentMarkers.forEach(m => m.remove());
 currentMarkers = [];
+markersByPlaceId = {};
 }
 
 function updateCounter(n) {
@@ -602,7 +709,8 @@ async function refresh() {
   let response;
   try {
       // все точки физически лежат в группе 1 (публичная группа)
-      response = await fetch(`${API_BASE}/v1/places?group_id=1&bbox=${bbox}`);
+      // передаём токен, чтобы бэкенд показал свои pending-точки
+      response = await apiFetch(`/v1/places?group_id=1&bbox=${bbox}`);
   } catch (e) {
       console.error(e);
       setStatus("Ошибка соединения с API", true);
@@ -639,7 +747,10 @@ async function refresh() {
   clearMarkers();
 
   filtered.forEach(p => {
-      const el = createPin(p.isMine);
+      // серый пин для точек на модерации, зелёный для своих, синий для чужих
+      const isPending = p.moderation_status === "pending";
+      const pinColor = isPending ? "#9ca3af" : undefined;
+      const el = createPin(p.isMine, pinColor);
 
       const who = p.isMine
           ? "Моя точка"
@@ -649,6 +760,11 @@ async function refresh() {
       p.title && p.title.trim()
           ? p.title
           : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
+
+      // плашка «На модерации» для pending-точек
+      const pendingBadge = isPending
+        ? `<div style="margin-top:4px;padding:2px 8px;background:#f3f4f6;color:#6b7280;border-radius:9999px;font-size:11px;display:inline-block;">На модерации</div>`
+        : "";
 
       let deleteButtonHtml = "";
       if (p.isMine) {
@@ -719,6 +835,7 @@ async function refresh() {
           ${titleBlock}
           ${noteBlock}
           <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
+          ${pendingBadge}
           ${addBtnHtml}
           ${photosHtml}
           ${deleteButtonHtml}
@@ -731,7 +848,17 @@ async function refresh() {
       .addTo(map);
 
       currentMarkers.push(marker);
+      markersByPlaceId[p.id] = marker;
   });
+
+  // Открываем попап, если был запрос через "Показать на карте"
+  if (pendingPopupPlaceId !== null) {
+    const marker = markersByPlaceId[pendingPopupPlaceId];
+    if (marker) {
+      marker.togglePopup();
+    }
+    pendingPopupPlaceId = null;
+  }
 
   updateCounter(filtered.length);
   setStatus("Подключено к API", false);
@@ -942,6 +1069,211 @@ document.getElementById("mm-photo-input").addEventListener("change", async (e) =
     _mmUploadPlaceId = null;
   }
 });
+
+// ========= Модерация (admin / moderator) =========
+
+async function loadModerationQueue() {
+  const list = document.getElementById("moderation-list");
+  if (!list) return;
+
+  list.innerHTML = "<div class='hint'>Загрузка...</div>";
+
+  try {
+    const resp = await apiFetch("/v1/moderation/places?status=pending");
+    if (!resp.ok) {
+      list.innerHTML = "<div class='hint'>Ошибка загрузки.</div>";
+      return;
+    }
+
+    const data = await resp.json();
+    const items = data.items || [];
+
+    if (!items.length) {
+      list.innerHTML = "<div class='hint'>Нет точек на модерации.</div>";
+      return;
+    }
+
+    list.innerHTML = items.map(p => {
+      const title = (p.title || "").trim() || `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
+      const author = p.user_login || p.username || "Аноним";
+      const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+      // Обрезаем описание до 100 символов для превью
+      const notePreview = p.note && p.note.length > 100
+        ? p.note.slice(0, 100) + "..."
+        : p.note || "";
+
+      // Превью фотографий (до 3 шт.)
+      const photos = (p.media || []).map(m =>
+        `<img src="${esc(m.url)}" alt="фото"
+          style="width:60px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;"
+          onclick="window.open('${esc(m.url)}','_blank')" />`
+      ).join("");
+      const photosHtml = photos
+        ? `<div style="display:flex;gap:4px;margin-top:4px;">${photos}</div>`
+        : "";
+
+      return `
+        <div style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
+          <div style="font-weight:500;">${esc(title)}</div>
+          <div style="font-size:12px;color:#6b7280;">${esc(author)} · ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
+          ${notePreview ? `<div style="font-size:12px;margin-top:2px;">${esc(notePreview)}</div>` : ""}
+          ${photosHtml}
+          <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
+            <button class="btn" style="font-size:12px;padding:2px 10px;"
+              onclick="showPlaceOnMap(${p.id},${p.lon},${p.lat})">Показать на карте</button>
+            <button class="btn btn-primary" style="font-size:12px;padding:2px 10px;"
+              onclick="moderatePlace(${p.id},'approved')">Одобрить</button>
+            <button class="btn" style="font-size:12px;padding:2px 10px;border-color:#dc2626;color:#b91c1c;"
+              onclick="moderatePlace(${p.id},'rejected')">Отклонить</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+  } catch (e) {
+    console.error(e);
+    list.innerHTML = "<div class='hint'>Ошибка сети.</div>";
+  }
+}
+
+/** Перелететь к точке на карте и открыть её попап */
+function showPlaceOnMap(placeId, lon, lat) {
+  // закрываем любые открытые попапы
+  currentMarkers.forEach(m => {
+    const popup = m.getPopup();
+    if (popup && popup.isOpen()) {
+      popup.remove();
+    }
+  });
+
+  // сохраняем id для открытия попапа после refresh (который вызовется при moveend)
+  pendingPopupPlaceId = placeId;
+  map.flyTo({ center: [lon, lat], zoom: 16 });
+}
+
+async function moderatePlace(placeId, status) {
+  try {
+    const resp = await apiFetch(`/v1/moderation/places/${placeId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!resp.ok) {
+      alert("Ошибка модерации (код " + resp.status + ").");
+      return;
+    }
+    // обновляем очередь и карту
+    loadModerationQueue();
+    refresh();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети при модерации.");
+  }
+}
+
+// ===================== Панель администратора =====================
+
+/** Кэш списка пользователей для клиентской фильтрации */
+let _adminUsersList = [];
+
+/** Загрузить список пользователей из API */
+async function loadAdminUsers() {
+  const list = document.getElementById("admin-users-list");
+  if (!list) return;
+
+  list.innerHTML = "<div class='hint'>Загрузка...</div>";
+
+  try {
+    const resp = await apiFetch("/v1/admin/users");
+    if (!resp.ok) {
+      list.innerHTML = "<div class='hint'>Ошибка загрузки.</div>";
+      return;
+    }
+    const data = await resp.json();
+    _adminUsersList = data.items || [];
+    renderAdminUsers(_adminUsersList);
+  } catch (e) {
+    console.error(e);
+    list.innerHTML = "<div class='hint'>Ошибка сети.</div>";
+  }
+}
+
+/** Фильтр списка пользователей по поисковой строке */
+function filterAdminUsers() {
+  const q = (document.getElementById("admin-search")?.value || "").trim().toLowerCase();
+  if (!q) {
+    renderAdminUsers(_adminUsersList);
+    return;
+  }
+  const filtered = _adminUsersList.filter(u =>
+    (u.login || "").toLowerCase().includes(q) ||
+    (u.email || "").toLowerCase().includes(q)
+  );
+  renderAdminUsers(filtered);
+}
+
+/** Отрисовать список пользователей */
+function renderAdminUsers(users) {
+  const list = document.getElementById("admin-users-list");
+  if (!list) return;
+
+  if (!users.length) {
+    list.innerHTML = "<div class='hint'>Пользователи не найдены.</div>";
+    return;
+  }
+
+  const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+  // роли для select (admin не назначается через интерфейс)
+  const roleLabels = { admin: "Админ", moderator: "Модератор", user: "Пользователь" };
+
+  list.innerHTML = users.map(u => {
+    const isSelf = currentUser && u.id === currentUser.id;
+    const isAdmin = u.role === "admin";
+    const disabled = isSelf || isAdmin ? "disabled" : "";
+
+    const options = ["user", "moderator"].map(r =>
+      `<option value="${r}" ${u.role === r ? "selected" : ""}>${esc(roleLabels[r])}</option>`
+    ).join("");
+
+    // для админа — текстовая метка, для остальных — select
+    const roleHtml = isAdmin
+      ? `<span style="font-size:12px;color:#4f46e5;font-weight:500;">Админ</span>`
+      : `<select ${disabled} style="font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid #d1d5db;width:100%;"
+          onchange="changeUserRole(${u.id}, this.value)">${options}</select>`;
+
+    return `
+      <div style="padding:6px 0;border-bottom:1px solid #e5e7eb;">
+        <div style="font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;">${esc(u.login || "—")}</div>
+        <div style="font-size:11px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;">${esc(u.email || "нет email")}</div>
+        <div style="margin-top:3px;">${roleHtml}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+/** Изменить роль пользователя */
+async function changeUserRole(userId, newRole) {
+  try {
+    const resp = await apiFetch(`/v1/admin/users/${userId}/role`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      alert("Ошибка: " + (data.detail || resp.status));
+      loadAdminUsers(); // откатываем select к реальному значению
+      return;
+    }
+    // обновляем список
+    loadAdminUsers();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
 
 initAuthFromStorage();
 map.on("load", refresh);

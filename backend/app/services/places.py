@@ -1,10 +1,14 @@
+"""Сервис работы с точками (создание, выборка, удаление, модерация)."""
+
 from typing import Optional, List, Dict
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
-from app.models.models import User, Place, Media
+from app.models.models import User, Place, Media, Group
 from app.services.users import UserService
 from app.storage import presign_get, move_to_place_folder, delete_place_folder
 from app.core.config import MEDIA_LIMIT_PER_PLACE
+
 
 class PlaceService:
     @staticmethod
@@ -25,6 +29,16 @@ class PlaceService:
 
         uid = UserService.ensure_user(db, user_id, tg_id, username)
 
+        # Определяем статус модерации:
+        # - публичная группа + обычный user → pending
+        # - admin/moderator или приватная группа → approved
+        moderation_status = "approved"
+        group = db.query(Group).filter(Group.id == group_id).one_or_none()
+        if group and group.visibility == "public":
+            user = db.query(User).filter(User.id == uid).one_or_none()
+            if user and user.role not in ("admin", "moderator"):
+                moderation_status = "pending"
+
         place = Place(
             group_id=group_id,
             user_id=uid,
@@ -32,6 +46,7 @@ class PlaceService:
             note=note,
             lat=lat,
             lon=lon,
+            moderation_status=moderation_status,
         )
         db.add(place)
         db.commit()
@@ -53,7 +68,21 @@ class PlaceService:
         return place.id
 
     @staticmethod
-    def list_places(db: Session, group_id: int, bbox: str) -> List[Dict]:
+    def list_places(
+        db: Session,
+        group_id: int,
+        bbox: str,
+        current_user_id: Optional[int] = None,
+        current_user_role: Optional[str] = None,
+    ) -> List[Dict]:
+        """Получить точки в bbox.
+
+        Для публичных групп:
+        - admin/moderator видят все точки (включая чужие pending);
+        - обычный пользователь — approved + свои pending;
+        - гость — только approved.
+        Для приватных групп: все точки (модерация не применяется).
+        """
         left, bottom, right, top = [float(x) for x in bbox.split(",")]
 
         q = (
@@ -64,9 +93,27 @@ class PlaceService:
             .filter(Place.lon <= right)
             .filter(Place.lat >= bottom)
             .filter(Place.lat <= top)
-            .limit(1000)
         )
-        rows = q.all()
+
+        # Фильтр модерации для публичных групп
+        group = db.query(Group).filter(Group.id == group_id).one_or_none()
+        if group and group.visibility == "public":
+            if current_user_role in ("admin", "moderator"):
+                # admin/moderator видят все точки, включая чужие pending
+                q = q.filter(Place.moderation_status.in_(["approved", "pending"]))
+            elif current_user_id is not None:
+                # обычный пользователь — approved + свои pending
+                q = q.filter(
+                    or_(
+                        Place.moderation_status == "approved",
+                        (Place.user_id == current_user_id) & (Place.moderation_status == "pending"),
+                    )
+                )
+            else:
+                # гость — только approved
+                q = q.filter(Place.moderation_status == "approved")
+
+        rows = q.limit(1000).all()
 
         place_ids = [place.id for place, _ in rows]
         media_map: Dict[int, List[Dict]] = {}
@@ -92,6 +139,7 @@ class PlaceService:
                 "user_tg_id": user.tg_id if user else None,
                 "username": user.username if user else None,
                 "user_login": user.login if user else None,
+                "moderation_status": place.moderation_status,
                 "media": media_map.get(place.id, []),
             })
         return items
@@ -101,7 +149,8 @@ class PlaceService:
         place = db.query(Place).filter(Place.id == place_id).one_or_none()
         if not place:
             return False
-        if place.user_id != user.id:
+        # владелец, модератор или админ могут удалять
+        if place.user_id != user.id and user.role not in ("admin", "moderator"):
             return False
 
         delete_place_folder(place.id)

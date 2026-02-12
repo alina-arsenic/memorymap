@@ -26,6 +26,9 @@
       <div class="field-label">Логин</div>
       <input id="login-input" class="input" />
 
+      <div class="field-label" style="margin-top:6px;">Email</div>
+      <input id="email-input" class="input" type="email" placeholder="Только для регистрации" />
+
       <div class="field-label" style="margin-top:6px;">Пароль</div>
       <input id="password-input" type="password" class="input" />
 
@@ -33,6 +36,20 @@
         <button class="btn btn-primary" onclick="uiLogin()">Войти</button>
         <button class="btn" onclick="uiRegister()">Регистрация</button>
       </div>
+    </div>
+
+    <!-- ФОРМА ПОДТВЕРЖДЕНИЯ EMAIL (скрыта по умолчанию) -->
+    <div id="verify-form" style="display:none;">
+      <div class="hint" style="margin-bottom:6px;">
+        Код подтверждения отправлен на <b id="verify-email-display"></b>
+      </div>
+      <div class="field-label">Код из письма</div>
+      <input id="verify-code-input" class="input" maxlength="6" placeholder="6 цифр" />
+      <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="uiVerifyEmail()">Подтвердить</button>
+        <button class="btn" onclick="uiResendCode()">Отправить повторно</button>
+      </div>
+      <div id="verify-status" class="hint" style="margin-top:6px;"></div>
     </div>
 
     <!-- КНОПКА ВЫХОДА (видна только когда вошли) -->
@@ -106,6 +123,25 @@
         Также можно добавить точку, отправив геолокацию боту <b>@memorymap_bot</b>.
       </div>
     </div>
+
+    <!-- ПАНЕЛЬ МОДЕРАЦИИ (только для admin/moderator) -->
+    <div id="moderation-panel" class="card" style="display:none;">
+      <div class="sidebar-section-title">Модерация</div>
+      <div class="hint" style="margin-bottom:6px;">Точки, ожидающие проверки.</div>
+      <div id="moderation-list" class="scrollable-list"></div>
+      <button class="btn" style="margin-top:6px;" onclick="loadModerationQueue()">Обновить</button>
+    </div>
+
+    <!-- ПАНЕЛЬ АДМИНИСТРАТОРА (только для admin) -->
+    <div id="admin-panel" class="card" style="display:none;">
+      <div class="sidebar-section-title">Управление пользователями</div>
+      <div class="hint" style="margin-bottom:6px;">Назначение ролей.</div>
+      <input id="admin-search" class="input" placeholder="Поиск по логину или email"
+        oninput="filterAdminUsers()" style="margin-bottom:6px;" />
+      <div id="admin-users-list" class="scrollable-list"></div>
+      <button class="btn" style="margin-top:6px;" onclick="loadAdminUsers()">Обновить</button>
+    </div>
+
     </div>
   </aside>
 

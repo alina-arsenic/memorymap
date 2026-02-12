@@ -3,6 +3,7 @@ from aiohttp import TCPConnector
 from urllib.parse import urlparse, urlunparse
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.filters import CommandStart, CommandObject
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -70,6 +71,47 @@ async def show_menu(chat_id: int, state: FSMContext, text: str):
 
 
 # ---------- Commands ----------
+
+@dp.message(CommandStart())
+async def cmd_start(m: types.Message, command: CommandObject):
+    """Обработчик /start. Если передан deep_link код — привязываем Telegram."""
+    code = command.args  # текст после /start (None если просто /start)
+
+    if not code:
+        await m.reply(
+            "Привет! Я бот MemoryMap.\n\n"
+            "Отправьте мне геолокацию, чтобы сохранить место на карте.\n"
+            "Для привязки аккаунта используйте ссылку с сайта."
+        )
+        return
+
+    # deep link: /start <code> — привязка Telegram к аккаунту
+    if not BOT_API_SECRET:
+        await m.reply("Бот не настроен: нет BOT_API_SECRET.")
+        return
+
+    r = requests.post(
+        f"{API_BASE}/v1/bot/link-telegram",
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        json={"code": code, "tg_id": m.from_user.id},
+        timeout=10,
+    )
+
+    if r.ok:
+        await m.reply(
+            "Готово! Telegram привязан к вашему профилю.\n"
+            "Теперь вы можете отправлять геолокацию для создания точек."
+        )
+    elif r.status_code == 400:
+        await m.reply("Код истёк. Сгенерируйте новый на сайте.")
+    elif r.status_code == 404:
+        await m.reply("Код не найден. Попробуйте сгенерировать новый на сайте.")
+    elif r.status_code == 409:
+        await m.reply("Код уже использован или этот Telegram уже привязан к другому аккаунту.")
+    else:
+        await m.reply(f"Ошибка привязки (код {r.status_code}).")
+
+
 @dp.message(F.text == "/whoami")
 async def whoami(m: types.Message):
     await m.reply(

@@ -57,8 +57,15 @@ def create_place(
     return {"id": pid}
 
 @router.get("/places")
-def list_places(group_id: int, bbox: str, db: Session = Depends(get_db)):
-    items = PlaceService.list_places(db=db, group_id=group_id, bbox=bbox)
+def list_places(
+    group_id: int,
+    bbox: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    uid = current_user.id if current_user else None
+    role = current_user.role if current_user else None
+    items = PlaceService.list_places(db=db, group_id=group_id, bbox=bbox, current_user_id=uid, current_user_role=role)
     return {"items": items}
 
 @router.post("/places/bot")

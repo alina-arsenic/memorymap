@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, Text, Float, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, BigInteger, Text, Float, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from app.core.db import Base
 
@@ -12,6 +12,9 @@ class User(Base):
 
     login = Column(Text, unique=True, nullable=True)
     password_hash = Column(Text, nullable=True)
+    email = Column(Text, unique=True, nullable=True)
+    email_verified = Column(Boolean, nullable=False, default=False)
+    role = Column(Text, nullable=False, default="user")  # admin | moderator | user
 
     places = relationship("Place", back_populates="user")
 
@@ -33,6 +36,7 @@ class Place(Base):
     note = Column(Text)
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
+    moderation_status = Column(Text, nullable=False, default="approved")  # pending | approved | rejected
 
     user = relationship("User", back_populates="places")
     group = relationship("Group", back_populates="places")
@@ -55,6 +59,19 @@ class Friend(Base):
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     friend_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     status = Column(Text, nullable=False, default="accepted")
+
+class EmailVerificationCode(Base):
+    """Одноразовый код подтверждения email (6 цифр, TTL из конфига)."""
+    __tablename__ = "email_verification_codes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    code = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+
 
 class TelegramLinkCode(Base):
     __tablename__ = "telegram_link_codes"

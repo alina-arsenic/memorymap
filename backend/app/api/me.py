@@ -11,6 +11,7 @@ from app.services.groups import GroupService
 from app.services.users import UserService
 from app.models.models import TelegramLinkCode
 from app.core.config import TELEGRAM_LINK_CODE_TTL_MINUTES
+from app.core.telegram import get_bot_username
 
 router = APIRouter()
 
@@ -32,6 +33,7 @@ def me(
         "tg_id": current_user.tg_id,
         "login": current_user.login,
         "username": current_user.username,
+        "role": current_user.role,
         "groups": groups,
         "friends": friends,
     }
@@ -61,4 +63,12 @@ def telegram_link_start(
     db.add(row)
     db.commit()
 
-    return {"code": code, "expires_in_minutes": TELEGRAM_LINK_CODE_TTL_MINUTES}
+    # формируем deep link, если известен username бота
+    bot_username = get_bot_username()
+    bot_link = f"https://t.me/{bot_username}?start={code}" if bot_username else None
+
+    return {
+        "code": code,
+        "bot_link": bot_link,
+        "expires_in_minutes": TELEGRAM_LINK_CODE_TTL_MINUTES,
+    }

@@ -23,6 +23,7 @@ html, body {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    overflow-y: auto;
 }
 
 .sidebar-section-title {
@@ -218,6 +219,12 @@ html, body {
     border-right: none;
     border-bottom: 1px solid #e5e7eb;
     }
+}
+
+/* Скроллируемый список внутри карточки sidebar */
+.scrollable-list {
+    max-height: 250px;
+    overflow-y: auto;
 }
 
 .mm-edit-row { display:flex; align-items:center; gap:6px; }
