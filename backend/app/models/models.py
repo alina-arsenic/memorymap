@@ -55,6 +55,8 @@ class Media(Base):
     user = relationship("User")
 
 class Friend(Base):
+    """Legacy one-way friends table (deprecated)."""
+
     __tablename__ = "friends"
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     friend_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
@@ -83,3 +85,19 @@ class TelegramLinkCode(Base):
     used_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User")
+
+
+class Friendship(Base):
+    __tablename__ = "friendships"
+    user1_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    user2_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    created_at = Column(DateTime(timezone=True))
+
+class FriendRequest(Base):
+    __tablename__ = "friend_requests"
+    id = Column(Integer, primary_key=True)
+    from_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    to_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(Text, nullable=False, default="pending")  # pending|accepted|declined|canceled
+    created_at = Column(DateTime(timezone=True))
+    responded_at = Column(DateTime(timezone=True))

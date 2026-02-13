@@ -60,6 +60,16 @@ function applyAuthUI(isAuthed) {
   if (logoutBtn) logoutBtn.style.display = isAuthed ? "" : "none";
   if (authedOnly) authedOnly.style.display = isAuthed ? "" : "none";
 
+
+  const notifBtn = document.getElementById("notif-btn");
+  const notifBadge = document.getElementById("notif-badge");
+  if (notifBtn) notifBtn.style.display = isAuthed ? "" : "none";
+  if (!isAuthed) {
+    if (notifBadge) { notifBadge.innerText = "0"; notifBadge.style.display = "none"; }
+    closeFriendRequestsModal(true);
+  }
+
+
   const tgStatus = document.getElementById("tg-status");
 
   if (!isAuthed) {
@@ -200,6 +210,11 @@ async function loadMe() {
     adminPanel.style.display = isAdmin ? "" : "none";
     if (isAdmin) loadAdminUsers();
   }
+
+  // Друзья/уведомления
+  refreshFriendsUI();
+  updateNotifBadge();
+
 }
 
 async function uiLogin() {
@@ -428,6 +443,329 @@ async function startTelegramLink() {
     if (tgCode) tgCode.innerText = "Ошибка сети при генерации кода.";
   }
 }
+
+
+// -------------------- FRIENDS UI --------------------
+
+function updateNotifBadge() {
+  const badge = document.getElementById("notif-badge");
+  if (!badge) return;
+
+  const n = (currentUser && typeof currentUser.friend_requests_inbox_count === "number")
+    ? currentUser.friend_requests_inbox_count
+    : 0;
+
+  badge.innerText = String(n);
+  badge.style.display = n > 0 ? "" : "none";
+}
+
+function refreshFriendsUI() {
+  const listEl = document.getElementById("friends-list");
+  if (!listEl) return;
+
+  const friends = (currentUser && Array.isArray(currentUser.friends)) ? currentUser.friends : [];
+  if (friends.length === 0) {
+    listEl.innerHTML = `<div class="hint">Пока друзей нет.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = friends.map(u => {
+    const title = escapeHtml(u.login || u.username || `user#${u.id}`);
+    const sub = escapeHtml(
+      [
+        u.username ? `@${u.username}` : null,
+        u.tg_id ? `tg:${u.tg_id}` : null,
+      ].filter(Boolean).join(" • ")
+    );
+
+    return `
+      <div class="list-item">
+        <div class="meta">
+          <div class="title">${title}</div>
+          <div class="sub">${sub || ""}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function uiSearchUsers() {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+
+  const qEl = document.getElementById("friends-search-input");
+  const statusEl = document.getElementById("friends-search-status");
+  const resEl = document.getElementById("friends-search-results");
+  if (!qEl || !resEl) return;
+
+  const q = (qEl.value || "").trim();
+  if (!q) {
+    if (statusEl) statusEl.innerText = "Введите строку поиска.";
+    resEl.innerHTML = "";
+    return;
+  }
+
+  if (statusEl) statusEl.innerText = "Ищу…";
+  resEl.innerHTML = "";
+
+  try {
+    const resp = await apiFetch(`/v1/users/search?q=${encodeURIComponent(q)}&limit=20`);
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
+
+    const items = Array.isArray(data.items) ? data.items : [];
+    const myId = currentUser ? currentUser.id : null;
+    const friendIds = new Set(((currentUser && currentUser.friends) || []).map(x => x.id));
+
+    const filtered = items.filter(u => u && u.id && u.id !== myId);
+
+    if (filtered.length === 0) {
+      if (statusEl) statusEl.innerText = "Ничего не найдено.";
+      return;
+    }
+
+    if (statusEl) statusEl.innerText = `Найдено: ${filtered.length}`;
+
+    resEl.innerHTML = filtered.map(u => {
+      const title = escapeHtml(u.login || u.username || `user#${u.id}`);
+      const sub = escapeHtml(
+        [
+          u.username ? `@${u.username}` : null,
+          u.tg_id ? `tg:${u.tg_id}` : null,
+        ].filter(Boolean).join(" • ")
+      );
+
+      const alreadyFriend = friendIds.has(u.id);
+      return `
+        <div class="list-item">
+          <div class="meta">
+            <div class="title">${title}</div>
+            <div class="sub">${sub || ""}</div>
+          </div>
+          <div class="actions">
+            ${
+              alreadyFriend
+                ? `<span class="hint">уже друг</span>`
+                : `<button class="btn btn-primary" onclick="sendFriendRequest(${u.id})">Добавить</button>`
+            }
+          </div>
+        </div>
+      `;
+    }).join("");
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+async function sendFriendRequest(toUserId) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+
+  try {
+    const resp = await apiFetch("/v1/friends/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to_user_id: toUserId }),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось отправить приглашение: " + (data.detail || resp.status));
+      return;
+    }
+
+    alert("Приглашение отправлено.");
+    await refreshUserSnapshot(); // обновим счетчики и списки
+    uiSearchUsers(); // перерисуем результаты поиска (кнопка станет неактивной/уже друг)
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети при отправке приглашения.");
+  }
+}
+
+function closeModalOnOverlay(event) {
+  // закрываем, если кликнули именно по оверлею
+  if (event && event.target && event.target.id === "modal-overlay") {
+    closeFriendRequestsModal();
+  }
+}
+
+async function openFriendRequestsModal() {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+
+  const overlay = document.getElementById("modal-overlay");
+  if (!overlay) return;
+
+  overlay.style.display = "";
+
+  // загрузим списки
+  await loadFriendRequestsLists();
+}
+
+function closeFriendRequestsModal(silent = false) {
+  const overlay = document.getElementById("modal-overlay");
+  if (!overlay) return;
+
+  overlay.style.display = "none";
+
+  // опционально: очистка списков
+  const inbox = document.getElementById("inbox-requests");
+  const outbox = document.getElementById("outbox-requests");
+  if (inbox) inbox.innerHTML = "";
+  if (outbox) outbox.innerHTML = "";
+
+  if (!silent) {
+    // ничего
+  }
+}
+
+async function loadFriendRequestsLists() {
+  const inbox = document.getElementById("inbox-requests");
+  const outbox = document.getElementById("outbox-requests");
+  if (!inbox || !outbox) return;
+
+  inbox.innerHTML = `<div class="hint">Загрузка…</div>`;
+  outbox.innerHTML = `<div class="hint">Загрузка…</div>`;
+
+  try {
+    const [inResp, outResp] = await Promise.all([
+      apiFetch("/v1/friends/requests?inbox=1&status=pending"),
+      apiFetch("/v1/friends/requests?outbox=1&status=pending"),
+    ]);
+
+    const inData = await inResp.json().catch(() => ({}));
+    const outData = await outResp.json().catch(() => ({}));
+
+    if (!inResp.ok) {
+      inbox.innerHTML = `<div class="hint">Ошибка: ${escapeHtml(inData.detail || String(inResp.status))}</div>`;
+    } else {
+      const items = Array.isArray(inData.items) ? inData.items : [];
+      if (items.length === 0) {
+        inbox.innerHTML = `<div class="hint">Нет входящих приглашений.</div>`;
+      } else {
+        inbox.innerHTML = items.map(r => {
+          const from = r.from_user || {};
+          const title = escapeHtml(from.login || from.username || `user#${from.id || "?"}`);
+          const sub = escapeHtml(
+            [
+              from.username ? `@${from.username}` : null,
+              from.tg_id ? `tg:${from.tg_id}` : null,
+            ].filter(Boolean).join(" • ")
+          );
+
+          return `
+            <div class="list-item">
+              <div class="meta">
+                <div class="title">${title}</div>
+                <div class="sub">${sub || ""}</div>
+              </div>
+              <div class="actions">
+                <button class="btn btn-primary" onclick="acceptFriendRequest(${r.id})">Принять</button>
+                <button class="btn" onclick="declineFriendRequest(${r.id})">Отклонить</button>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+    }
+
+    if (!outResp.ok) {
+      outbox.innerHTML = `<div class="hint">Ошибка: ${escapeHtml(outData.detail || String(outResp.status))}</div>`;
+    } else {
+      const items = Array.isArray(outData.items) ? outData.items : [];
+      if (items.length === 0) {
+        outbox.innerHTML = `<div class="hint">Нет исходящих приглашений.</div>`;
+      } else {
+        outbox.innerHTML = items.map(r => {
+          const to = r.to_user || {};
+          const title = escapeHtml(to.login || to.username || `user#${to.id || "?"}`);
+          const sub = escapeHtml(
+            [
+              to.username ? `@${to.username}` : null,
+              to.tg_id ? `tg:${to.tg_id}` : null,
+            ].filter(Boolean).join(" • ")
+          );
+
+          return `
+            <div class="list-item">
+              <div class="meta">
+                <div class="title">${title}</div>
+                <div class="sub">${sub || ""}</div>
+              </div>
+              <div class="actions">
+                <span class="hint">ожидает</span>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+    }
+
+    // обновим счетчик (на случай если приняли с другого устройства)
+    await refreshUserSnapshot();
+    updateNotifBadge();
+    refreshFriendsUI();
+  } catch (e) {
+    console.error(e);
+    inbox.innerHTML = `<div class="hint">Ошибка сети.</div>`;
+    outbox.innerHTML = `<div class="hint">Ошибка сети.</div>`;
+  }
+}
+
+async function acceptFriendRequest(requestId) {
+  try {
+    const resp = await apiFetch(`/v1/friends/requests/${requestId}/accept`, { method: "POST" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось принять: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    await loadFriendRequestsLists();
+    refresh(); // чтобы новые точки от друзей (в будущем) могли появиться; сейчас просто безопасно
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
+
+async function declineFriendRequest(requestId) {
+  try {
+    const resp = await apiFetch(`/v1/friends/requests/${requestId}/decline`, { method: "POST" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось отклонить: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    await loadFriendRequestsLists();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
+
+// Лёгкое обновление currentUser (без трогания панелей модерации/админки)
+async function refreshUserSnapshot() {
+  if (!accessToken) return;
+  const resp = await apiFetch("/v1/me");
+  if (!resp.ok) return;
+  currentUser = await resp.json().catch(() => currentUser);
+}
+
+// маленький HTML-эскейпер для вывода в innerHTML
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 
 async function addWebPoint() {
 const statusEl = document.getElementById("web-add-status");
@@ -1276,5 +1614,16 @@ async function changeUserRole(userId, newRole) {
 }
 
 initAuthFromStorage();
+
+// периодически обновляем счетчик уведомлений и список друзей
+setInterval(async () => {
+  if (!accessToken) return;
+  try {
+    await refreshUserSnapshot();
+    updateNotifBadge();
+    refreshFriendsUI();
+  } catch (e) { /* ignore */ }
+}, 20000);
+
 map.on("load", refresh);
 map.on("moveend", refresh);

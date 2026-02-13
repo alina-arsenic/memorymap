@@ -9,6 +9,7 @@ from app.core.auth import get_current_user
 from app.models.models import User
 from app.services.groups import GroupService
 from app.services.users import UserService
+from app.services.friends import FriendsService
 from app.models.models import TelegramLinkCode
 from app.core.config import TELEGRAM_LINK_CODE_TTL_MINUTES
 from app.core.telegram import get_bot_username
@@ -28,6 +29,8 @@ def me(
 
     groups = GroupService.list_groups(db, current_user)
     friends = UserService.list_friends(db, current_user)
+    inbox_count = FriendsService.inbox_count(db, current_user)
+
     return {
         "id": current_user.id,
         "tg_id": current_user.tg_id,
@@ -36,8 +39,10 @@ def me(
         "role": current_user.role,
         "groups": groups,
         "friends": friends,
+        "friend_requests_inbox_count": inbox_count,
     }
 
+# Legacy endpoint: keep path for compatibility, but now it creates a friend REQUEST by tg_id.
 @router.post("/friends")
 def add_friend(
     req: AddFriendReq,
@@ -46,7 +51,10 @@ def add_friend(
 ):
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return UserService.add_friend(db, current_user, req.friend_tg_id)
+    try:
+        return UserService.add_friend_by_tg_id_as_request(db, current_user, req.friend_tg_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/me/telegram-link/start")
 def telegram_link_start(
