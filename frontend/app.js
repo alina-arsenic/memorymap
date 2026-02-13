@@ -13,6 +13,10 @@ let tempCoords = null; // { lng, lat } последнего ПКМ
 // Friends UI state
 let outgoingPendingIds = new Set();
 
+// Layers UI state
+let selectedGroupLayerIds = new Set(); // group_id for personal/shared layers (not public=1)
+let personalGroupId = null;
+
 async function apiFetch(path, { method = "GET", headers = {}, body = null } = {}) {
   const h = { ...headers };
   if (accessToken) h["Authorization"] = "Bearer " + accessToken;
@@ -218,9 +222,12 @@ async function loadMe() {
   refreshFriendsUI();
   updateNotifBadge();
 
+  // Слои
+  renderGroupLayersUI();
+  populateAddGroupSelect();
+
   // pre-load pending outgoing requests so the search button can show "Ждём ответ"
   await loadFriendRequestsListsSafe();
-
 }
 
 async function uiLogin() {
@@ -499,6 +506,415 @@ function refreshFriendsUI() {
   }).join("");
 }
 
+function renderGroupLayersUI() {
+  const listEl = document.getElementById("group-layers-list");
+  if (!listEl) return;
+
+  const groups = (currentUser && Array.isArray(currentUser.groups)) ? currentUser.groups : [];
+  const meId = currentUser?.id;
+
+  // detect personal group (preferred: is_personal flag; fallback: legacy name)
+  personalGroupId = null;
+  for (const g of groups) {
+    if (!g || !g.id) continue;
+    if (g.is_personal === true) { personalGroupId = g.id; break; }
+  }
+  if (!personalGroupId) {
+    for (const g of groups) {
+      if (g && g.visibility === "private" && typeof g.name === "string" && meId != null) {
+        if (g.name === `Личная карта ${meId}` || g.name === `Личная карта`) {
+          personalGroupId = g.id;
+          break;
+        }
+      }
+    }
+  }
+
+  const layerGroups = groups
+    .filter(g => g && g.id && g.visibility !== "public" && g.id !== 1 && (!personalGroupId || g.id !== personalGroupId))
+    .sort((a,b) => (a.id||0) - (b.id||0));
+
+  const parts = [];
+
+  if (personalGroupId) {
+    const checked = selectedGroupLayerIds.has(personalGroupId) ? "checked" : "";
+    parts.push(
+      `<div class="layer-row">
+        <div class="left">
+          <input type="checkbox" ${checked} onchange="toggleGroupLayer(${personalGroupId}, this.checked)">
+          <div>
+            <div class="name">Личная карта</div>
+            <div class="meta">только вы</div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-ghost btn-icon" title="Открыть" onclick="openEditLayerModal(${personalGroupId})">⚙</button>
+        </div>
+      </div>`
+    );
+  } else {
+    parts.push(`<div class="hint">Личный слой появится после первого захода в аккаунт.</div>`);
+  }
+
+  for (const g of layerGroups) {
+    const checked = selectedGroupLayerIds.has(g.id) ? "checked" : "";
+    const name = escapeHtml(g.name || `Слой ${g.id}`);
+    const visibility = g.visibility === "friends" ? "друзья" : "приватный";
+    const role = g.my_role ? String(g.my_role) : "";
+    const canEdit = role === "owner";
+    parts.push(
+      `<div class="layer-row">
+        <div class="left">
+          <input type="checkbox" ${checked} onchange="toggleGroupLayer(${g.id}, this.checked)">
+          <div style="min-width:0;">
+            <div class="name">${name}</div>
+            <div class="meta">${escapeHtml(visibility)}${role ? ` • ${escapeHtml(role)}` : ""}</div>
+          </div>
+        </div>
+        <div class="actions">
+          ${canEdit ? `<button class="btn btn-ghost btn-icon" title="Настроить слой" onclick="openEditLayerModal(${g.id})">⚙</button>` : ``}
+        </div>
+      </div>`
+    );
+  }
+
+  listEl.innerHTML = parts.join("");
+}
+
+function toggleGroupLayer(groupId, isChecked) {
+  if (isChecked) selectedGroupLayerIds.add(groupId);
+  else selectedGroupLayerIds.delete(groupId);
+  refresh();
+}
+
+function populateAddGroupSelect() {
+  const sel = document.getElementById("web-group");
+  if (!sel) return;
+
+  const groups = (currentUser && Array.isArray(currentUser.groups)) ? currentUser.groups : [];
+  // Only show groups where user can write: public, or private where role owner/editor.
+  const opts = [];
+  opts.push({ id: 1, label: "Публичные точки" });
+  if (personalGroupId) opts.push({ id: personalGroupId, label: "Личная карта" });
+
+  for (const g of groups) {
+    if (!g || !g.id) continue;
+    if (g.id === 1) continue;
+    if (g.visibility === "public") continue;
+    const role = g.my_role;
+    if (role === "owner" || role === "editor") {
+      if (personalGroupId && g.id === personalGroupId) continue;
+      opts.push({ id: g.id, label: g.name || `Слой ${g.id}` });
+    }
+  }
+
+  const current = Number(sel.value || 1);
+  sel.innerHTML = opts.map(o => `<option value="${o.id}">${escapeHtml(o.label)}</option>`).join("");
+  // keep selection if possible
+  const still = opts.find(o => o.id === current);
+  sel.value = String(still ? current : 1);
+}
+
+// -------------------- LAYERS MODAL (groups UI) --------------------
+
+function closeLayersModalOnOverlay(event) {
+  if (event && event.target && event.target.id === "layers-modal-overlay") {
+    closeLayersModal();
+  }
+}
+
+function closeLayersModal() {
+  const overlay = document.getElementById("layers-modal-overlay");
+  if (!overlay) return;
+  overlay.style.display = "none";
+  const content = document.getElementById("layers-modal-content");
+  if (content) content.innerHTML = "";
+}
+
+function openLayersModal(title, html) {
+  const overlay = document.getElementById("layers-modal-overlay");
+  const t = document.getElementById("layers-modal-title");
+  const content = document.getElementById("layers-modal-content");
+  if (!overlay || !content || !t) return;
+  t.innerText = title || "Слой";
+  content.innerHTML = html;
+  overlay.style.display = "";
+}
+
+function openCreateLayerModal() {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+  const friends = (currentUser && Array.isArray(currentUser.friends)) ? currentUser.friends : [];
+  const friendsHtml = friends.length === 0
+    ? `<div class="hint">Добавлять редакторов можно только из друзей. Пока друзей нет.</div>`
+    : friends.map(f => {
+        const label = escapeHtml(f.login || f.username || `user#${f.id}`);
+        return `
+          <label style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+            <input type="checkbox" class="layer-friend-checkbox" value="${f.id}">
+            <span>${label}</span>
+          </label>
+        `;
+      }).join("");
+
+  openLayersModal("Новый слой", `
+    <div class="field-label">Название слоя</div>
+    <input id="layer-create-name" class="input" placeholder="Например: Поездки" />
+
+    <div class="field-label" style="margin-top:10px;">Добавить редакторов (друзья)</div>
+    <div style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:14px;padding:8px;">
+      ${friendsHtml}
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+      <button class="btn" onclick="closeLayersModal()">Отмена</button>
+      <button class="btn btn-primary" onclick="submitCreateLayer()">Создать</button>
+    </div>
+    <div id="layer-create-status" class="hint" style="margin-top:8px;"></div>
+  `);
+}
+
+async function submitCreateLayer() {
+  const statusEl = document.getElementById("layer-create-status");
+  const nameEl = document.getElementById("layer-create-name");
+  const name = (nameEl ? nameEl.value : "").trim();
+  if (!name) { if (statusEl) statusEl.innerText = "Введите название."; return; }
+
+  const checked = Array.from(document.querySelectorAll(".layer-friend-checkbox"))
+    .filter(x => x.checked)
+    .map(x => Number(x.value))
+    .filter(Boolean);
+
+  try {
+    if (statusEl) statusEl.innerText = "Создаю слой…";
+    const resp = await apiFetch("/v1/groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, visibility: "private", add_friends: false }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
+    const gid = data.id;
+
+    // add selected friends as editors
+    for (const uid of checked) {
+      await apiFetch(`/v1/groups/${gid}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: uid, role: "editor" }),
+      });
+    }
+
+    await refreshUserSnapshot();
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    closeLayersModal();
+    alert("Слой создан.");
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+async function openEditLayerModal(groupId) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+
+  // determine my role from current snapshot
+  const g = ((currentUser && currentUser.groups) || []).find(x => x.id === groupId);
+  const myRole = g ? g.my_role : null;
+  const isOwner = myRole === "owner" || currentUser?.role === "admin";
+  const isPersonal = personalGroupId && groupId === personalGroupId;
+
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}`);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось открыть слой: " + (data.detail || resp.status));
+      return;
+    }
+
+    const title = escapeHtml(data.name || `Слой ${groupId}`);
+    const members = Array.isArray(data.members) ? data.members : [];
+    const friends = (currentUser && Array.isArray(currentUser.friends)) ? currentUser.friends : [];
+    const memberIds = new Set(members.map(m => m.id));
+    const addable = friends.filter(f => !memberIds.has(f.id));
+
+    const membersHtml = members.map(m => {
+      const label = escapeHtml(m.login || m.username || `user#${m.id}`);
+      const role = m.role || "viewer";
+      const isSelf = currentUser && m.id === currentUser.id;
+      const isOwnerMember = role === "owner";
+
+      const roleControl = (!isOwner || isOwnerMember || isSelf)
+        ? `<span class="hint">${escapeHtml(role)}</span>`
+        : `
+            <select class="input" style="padding:4px 8px;" onchange="changeLayerMemberRole(${groupId}, ${m.id}, this.value)">
+              <option value="editor" ${role === "editor" ? "selected" : ""}>editor</option>
+              <option value="viewer" ${role === "viewer" ? "selected" : ""}>viewer</option>
+            </select>
+          `;
+
+      const removeBtn = (!isOwner || isOwnerMember || isSelf)
+        ? ``
+        : `<button class="btn btn-ghost btn-icon" title="Удалить" onclick="removeLayerMember(${groupId}, ${m.id}, '${label}')">✕</button>`;
+
+      return `
+        <div class="list-item" style="align-items:center;">
+          <div class="meta">
+            <div class="title">${label}</div>
+            <div class="sub">role: ${escapeHtml(role)}</div>
+          </div>
+          <div class="actions" style="display:flex;gap:6px;align-items:center;">
+            ${roleControl}
+            ${removeBtn}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    const addFriendOptions = addable.map(f => {
+      const label = escapeHtml(f.login || f.username || `user#${f.id}`);
+      return `<option value="${f.id}">${label}</option>`;
+    }).join("");
+
+    const addSection = (isOwner && !isPersonal) ? `
+      <div class="divider" style="margin:12px 0;"></div>
+      <div class="field-label">Добавить друга</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="layer-add-user" class="input" style="flex:1;">
+          ${addFriendOptions || ""}
+        </select>
+        <select id="layer-add-role" class="input" style="width:140px;">
+          <option value="editor">editor</option>
+          <option value="viewer">viewer</option>
+        </select>
+        <button class="btn btn-primary" onclick="addLayerMember(${groupId})" ${addable.length ? "" : "disabled"}>Добавить</button>
+      </div>
+      <div class="hint" style="margin-top:6px;">Добавлять можно только друзей.</div>
+    ` : `
+      <div class="hint" style="margin-top:10px;">Управлять участниками может только владелец слоя.</div>
+    `;
+
+    const renameSection = isOwner ? `
+      <div class="field-label">Переименовать</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="layer-rename" class="input" value="${title}" style="flex:1;" />
+        <button class="btn" onclick="renameLayer(${groupId})">Сохранить</button>
+      </div>
+    ` : ``;
+
+    openLayersModal(`Слой: ${title}`, `
+      ${renameSection}
+      <div class="field-label" style="margin-top:10px;">Участники</div>
+      <div class="list" style="margin-top:8px;">${membersHtml || `<div class="hint">Нет участников.</div>`}</div>
+      ${isPersonal ? `<div class="hint" style="margin-top:10px;">Личный слой не поддерживает совместное редактирование.</div>` : addSection}
+      <div id="layer-edit-status" class="hint" style="margin-top:10px;"></div>
+    `);
+
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
+
+async function renameLayer(groupId) {
+  const statusEl = document.getElementById("layer-edit-status");
+  const inp = document.getElementById("layer-rename");
+  const name = (inp ? inp.value : "").trim();
+  if (!name) { if (statusEl) statusEl.innerText = "Название не может быть пустым."; return; }
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
+    await refreshUserSnapshot();
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    if (statusEl) statusEl.innerText = "Сохранено.";
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+async function addLayerMember(groupId) {
+  const statusEl = document.getElementById("layer-edit-status");
+  const userSel = document.getElementById("layer-add-user");
+  const roleSel = document.getElementById("layer-add-role");
+  const uid = userSel ? Number(userSel.value) : null;
+  const role = roleSel ? roleSel.value : "editor";
+  if (!uid) return;
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: uid, role }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
+    await refreshUserSnapshot();
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    openEditLayerModal(groupId);
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+async function removeLayerMember(groupId, userId, displayName) {
+  const ok = confirm(`Удалить пользователя ${displayName} из слоя?`);
+  if (!ok) return;
+  const statusEl = document.getElementById("layer-edit-status");
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}/members/${userId}`, { method: "DELETE" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
+    await refreshUserSnapshot();
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    openEditLayerModal(groupId);
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+async function changeLayerMemberRole(groupId, userId, role) {
+  const statusEl = document.getElementById("layer-edit-status");
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}/members/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
+    await refreshUserSnapshot();
+    openEditLayerModal(groupId);
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
 async function confirmRemoveFriend(friendId, friendName) {
   if (!accessToken) { alert("Сначала войдите."); return; }
   const ok = confirm(`Точно хотите удалить из друзей ${friendName}?`);
@@ -583,7 +999,7 @@ async function uiSearchUsers() {
           <div class="actions">
             ${
               alreadyFriend
-                ? `<span class="hint">уже друг</span>`
+                ? `<button id="${btnId}" class="btn btn-success" disabled>Друг</button>`
                 : pending
                   ? `<button id="${btnId}" class="btn btn-secondary" disabled>Ждём ответ</button>`
                   : `<button id="${btnId}" class="btn btn-primary" onclick="sendFriendRequest(${u.id})">Добавить</button>`
@@ -910,8 +1326,11 @@ if (files.length > 0) {
     }
 }
 
+const groupSelect = document.getElementById("web-group");
+const chosenGroupId = groupSelect ? Number(groupSelect.value || 1) : 1;
+
 const body = {
-  group_id: 1,
+  group_id: chosenGroupId,
   title: titleFinal,
   note: note,
   lat: tempCoords.lat,
@@ -1114,10 +1533,12 @@ async function refresh() {
   const showPublic = document.getElementById("layer-public").checked;
   const showMy = document.getElementById("layer-my").checked;
 
-  if (!showPublic && !showMy) {
-      clearMarkers();
-      updateCounter(0);
-      return;
+  const extraSelected = Array.from(selectedGroupLayerIds);
+
+  if (!showPublic && !showMy && extraSelected.length === 0) {
+    clearMarkers();
+    updateCounter(0);
+    return;
   }
 
   const bounds = map.getBounds();
@@ -1128,41 +1549,46 @@ async function refresh() {
       bounds.getNorth()
   ].join(",");
 
-  let response;
+  let allItems = [];
   try {
-      // все точки физически лежат в группе 1 (публичная группа)
-      // передаём токен, чтобы бэкенд показал свои pending-точки
-      response = await apiFetch(`/v1/places?group_id=1&bbox=${bbox}`);
+    const gids = [];
+    if (showPublic || showMy) gids.push(1);
+    for (const gid of extraSelected) gids.push(gid);
+
+    const q = `/v1/places/feed?bbox=${encodeURIComponent(bbox)}&scope=all&group_ids=${encodeURIComponent(gids.join(","))}`;
+    const r = await apiFetch(q);
+    if (!r.ok) {
+      console.error("Bad status:", r.status);
+      setStatus("Ошибка API: " + r.status, true);
+      return;
+    }
+    const d = await r.json().catch(() => ({}));
+    allItems = d.items || [];
   } catch (e) {
-      console.error(e);
-      setStatus("Ошибка соединения с API", true);
-      return;
+    console.error(e);
+    setStatus("Ошибка соединения с API", true);
+    return;
   }
-
-  if (!response.ok) {
-      console.error("Bad status:", response.status);
-      setStatus("Ошибка API: " + response.status, true);
-      return;
-  }
-
-  const data = await response.json();
-  const items = data.items || [];
 
   const myUserId = currentUser?.id != null ? String(currentUser.id) : null;
   const filtered = [];
 
-  for (const p of items) {
+  for (const p of allItems) {
       const ownerUserId = p.user_id != null ? String(p.user_id) : null;
       const isMine = myUserId && ownerUserId && ownerUserId === myUserId;
 
-      if (showPublic && showMy) {
-      filtered.push({ ...p, isMine });
-      } else if (showMy && !showPublic) {
-      if (isMine) {
-          filtered.push({ ...p, isMine: true });
-      }
-      } else if (showPublic && !showMy) {
-      filtered.push({ ...p, isMine });
+      // For public group (group_id=1), apply public/my filters.
+      if (p.group_id === 1 || p.group_id === "1") {
+        if (showPublic && showMy) {
+          filtered.push({ ...p, isMine });
+        } else if (showMy && !showPublic) {
+          if (isMine) filtered.push({ ...p, isMine: true });
+        } else if (showPublic && !showMy) {
+          filtered.push({ ...p, isMine });
+        }
+      } else {
+        // For private/group layers: show all points from selected layers
+        filtered.push({ ...p, isMine });
       }
   }
 
@@ -1706,8 +2132,24 @@ setInterval(async () => {
     await refreshUserSnapshot();
     updateNotifBadge();
     refreshFriendsUI();
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    await loadFriendRequestsListsSafe();
+    maybeRefreshSearchResults();
   } catch (e) { /* ignore */ }
-}, 20000);
+}, 8000);
+
+function maybeRefreshSearchResults() {
+  const qEl = document.getElementById("friends-search-input");
+  const resEl = document.getElementById("friends-search-results");
+  if (!qEl || !resEl) return;
+  const q = (qEl.value || "").trim();
+  if (!q) return;
+  // Only refresh if the user has already run a search (i.e. results are shown)
+  if (resEl.innerHTML && resEl.innerHTML.trim().length > 0) {
+    uiSearchUsers();
+  }
+}
 
 map.on("load", refresh);
 map.on("moveend", refresh);

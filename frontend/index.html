@@ -81,18 +81,29 @@
   <div id="authed-only" style="display:none;">
   <!-- card "Слои" -->
     <div class="card">
-      <div class="sidebar-section-title">Слои</div>
+      <div class="sidebar-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span>Слои</span>
+        <button class="btn" onclick="openCreateLayerModal()">+ Новый слой</button>
+      </div>
+
+      <div class="field-label" style="margin-top:6px;">Главные фильтры</div>
       <div class="layers-list">
         <label>
           <input type="checkbox" id="layer-public" checked onchange="onLayerChange()">
-          <span>Все точки</span>
+          <span>Все точки (публичные)</span>
         </label>
         <label>
           <input type="checkbox" id="layer-my" checked onchange="onLayerChange()">
-          <span>Мои точки</span>
+          <span>Мои точки (в публичном)</span>
         </label>
       </div>
-      <div class="hint">
+
+      <div class="divider" style="margin:10px 0;"></div>
+
+      <div class="field-label">Личные и групповые слои</div>
+      <div id="group-layers-list" class="list" style="margin-top:8px;"></div>
+      <div class="hint" style="margin-top:6px;">
+        Личный слой создаётся автоматически. Групповые слои — приватные карты, где вы можете добавлять редакторов.
       </div>
     </div>
     <div class="card">
@@ -129,6 +140,9 @@
 
       <div class="field-label" style="margin-top:6px;">Фотографии (до 12 шт.)</div>
       <input id="web-photos" type="file" accept="image/*" multiple class="input" />
+
+      <div class="field-label" style="margin-top:6px;">Куда добавить (слой)</div>
+      <select id="web-group" class="input"></select>
 
       <div class="field-label" style="margin-top:6px;">Координаты</div>
       <div id="web-coords" class="hint">
@@ -216,6 +230,19 @@
 
       <div class="field-label">Исходящие приглашения</div>
       <div id="outbox-requests" class="list" style="margin-top:8px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Layers modal -->
+<div id="layers-modal-overlay" class="modal-overlay" style="display:none;" onclick="closeLayersModalOnOverlay(event)">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="layers-modal-title">
+    <div class="modal-header">
+      <div id="layers-modal-title" class="modal-title">Слой</div>
+      <button class="btn btn-ghost" onclick="closeLayersModal()">Закрыть</button>
+    </div>
+    <div class="modal-body">
+      <div id="layers-modal-content"></div>
     </div>
   </div>
 </div>

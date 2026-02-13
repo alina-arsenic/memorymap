@@ -1,6 +1,7 @@
 from typing import Optional, List, Dict, Literal
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.models.models import User, Group
 
@@ -47,23 +48,74 @@ class GroupService:
 
     @staticmethod
     def list_groups(db: Session, user: Optional[User]) -> List[Dict]:
-        params = {}
-        base_sql = """
-        SELECT DISTINCT g.id, g.name, g.visibility
-        FROM groups g
-        LEFT JOIN membership m ON m.group_id = g.id
-        WHERE g.visibility = 'public'
-        """
-        if user is not None:
-            base_sql += " OR m.user_id = :uid"
-            params["uid"] = user.id
+        """List groups accessible to user.
 
-        rows = db.execute(text(base_sql), params).fetchall()
-        return [{"id": r[0], "name": r[1], "visibility": r[2]} for r in rows]
+        For authenticated users also returns my_role (owner|editor|viewer) when available.
+        """
+        params = {}
+        if user is None:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT g.id, g.name, g.visibility, g.is_personal, NULL::text AS my_role
+                    FROM groups g
+                    WHERE g.visibility='public'
+                    ORDER BY g.id
+                    """
+                )
+            ).fetchall()
+            return [{"id": r[0], "name": r[1], "visibility": r[2], "is_personal": r[3], "my_role": r[4]} for r in rows]
+
+        params["uid"] = user.id
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT g.id, g.name, g.visibility, g.is_personal,
+                    (SELECT role FROM membership WHERE user_id=:uid AND group_id=g.id LIMIT 1) AS my_role
+                FROM groups g
+                LEFT JOIN membership m ON m.group_id = g.id
+                WHERE g.visibility='public' OR m.user_id=:uid
+                ORDER BY g.id
+                """
+            ),
+            params,
+        ).fetchall()
+        return [{"id": r[0], "name": r[1], "visibility": r[2], "is_personal": r[3], "my_role": r[4]} for r in rows]
+
+    @staticmethod
+    def get_group_details(db: Session, user: User, group_id: int) -> Dict:
+        g = db.query(Group).filter(Group.id == group_id).first()
+        if not g:
+            raise ValueError("group_not_found")
+        GroupService.require_can_view(db, user, g)
+        my_role = GroupService._get_membership_role(db, user.id, group_id)
+        # public group: for non-members my_role can be None
+        rows = db.execute(
+            text(
+                """
+                SELECT u.id, u.login, u.username, u.tg_id, m.role
+                FROM membership m
+                JOIN users u ON u.id = m.user_id
+                WHERE m.group_id=:gid
+                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 WHEN 'viewer' THEN 2 ELSE 3 END, u.id
+                """
+            ),
+            {"gid": group_id},
+        ).fetchall()
+        members = [
+            {"id": r[0], "login": r[1], "username": r[2], "tg_id": r[3], "role": r[4]} for r in rows
+        ]
+        return {"id": g.id, "name": g.name, "visibility": g.visibility, "is_personal": getattr(g, "is_personal", False), "owner_id": getattr(g, "owner_id", None), "my_role": my_role, "members": members}
+
+    @staticmethod
+    def rename_group(db: Session, owner: User, group_id: int, name: str) -> None:
+        GroupService.require_is_owner(db, owner, group_id)
+        db.execute(text("UPDATE groups SET name=:name WHERE id=:gid"), {"name": name, "gid": group_id})
+        db.commit()
 
     @staticmethod
     def create_group(db: Session, owner: User, name: str, visibility: str, add_friends: bool = False) -> int:
-        g = Group(name=name, visibility=visibility)
+        g = Group(name=name, visibility=visibility, owner_id=owner.id, is_personal=False)
         db.add(g)
         db.commit()
         db.refresh(g)
@@ -104,27 +156,40 @@ class GroupService:
 
     @staticmethod
     def ensure_personal_group(db: Session, user: User) -> int:
-        """Create personal private group for user if it does not exist."""
-        name = f"Личная карта {user.id}"
+        """Ensure there is exactly one personal private group for user.
+
+        Uses groups.is_personal + groups.owner_id to make it idempotent.
+        """
         row = db.execute(
             text(
                 """
-                SELECT g.id
-                FROM groups g
-                JOIN membership m ON m.group_id=g.id
-                WHERE m.user_id=:uid AND m.role='owner' AND g.visibility='private' AND g.name=:name
+                SELECT id FROM groups
+                WHERE owner_id=:uid AND is_personal=TRUE
                 LIMIT 1
                 """
             ),
-            {"uid": user.id, "name": name},
+            {"uid": user.id},
         ).fetchone()
         if row:
             return int(row[0])
 
-        g = Group(name=name, visibility="private")
+        # Create; handle race by catching unique index violation (if two /me hit at once)
+        name = f"Личная карта {user.id}"
+        g = Group(name=name, visibility="private", owner_id=user.id, is_personal=True)
         db.add(g)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            row2 = db.execute(
+                text("SELECT id FROM groups WHERE owner_id=:uid AND is_personal=TRUE LIMIT 1"),
+                {"uid": user.id},
+            ).fetchone()
+            if row2:
+                return int(row2[0])
+            raise
         db.refresh(g)
+
         db.execute(
             text(
                 "INSERT INTO membership (user_id, group_id, role) VALUES (:uid, :gid, 'owner') "
@@ -134,6 +199,7 @@ class GroupService:
         )
         db.commit()
         return g.id
+
 
     @staticmethod
     def add_member(db: Session, owner: User, group_id: int, user_id: int, role: Literal["editor", "viewer"]) -> None:

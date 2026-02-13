@@ -24,6 +24,10 @@ class GroupMemberAdd(BaseModel):
 class GroupMemberRoleUpdate(BaseModel):
     role: str  # editor|viewer
 
+
+class GroupRename(BaseModel):
+    name: str
+
 @router.get("/groups")
 def list_groups(
     current_user: Optional[User] = Depends(get_current_user),
@@ -45,6 +49,41 @@ def create_group(
         db, owner=current_user, name=g.name, visibility=g.visibility, add_friends=g.add_friends
     )
     return {"id": gid}
+
+
+@router.get("/groups/{group_id}")
+def get_group(
+    group_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        return GroupService.get_group_details(db, current_user, group_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.patch("/groups/{group_id}")
+def rename_group(
+    group_id: int,
+    req: GroupRename,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="empty_name")
+    try:
+        GroupService.rename_group(db, current_user, group_id, name)
+        return {"status": "ok"}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 @router.post("/groups/{group_id}/members")

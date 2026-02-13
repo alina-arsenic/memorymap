@@ -23,6 +23,8 @@ class Group(Base):
     id = Column(Integer, primary_key=True)
     name = Column(Text, nullable=False)
     visibility = Column(Text, nullable=False, default="private")  # private|friends|public
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_personal = Column(Boolean, nullable=False, default=False)
 
     places = relationship("Place", back_populates="group")
 

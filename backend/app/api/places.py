@@ -93,6 +93,48 @@ def list_places(
             raise HTTPException(status_code=404, detail="group_not_found")
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.get("/places/feed")
+def list_places_feed(
+    bbox: str,
+    scope: str = "all",
+    group_ids: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch places across accessible groups.
+
+    - bbox: "left,bottom,right,top"
+    - scope: all|mine
+    - group_ids: optional comma-separated list of group ids to restrict
+    """
+    uid = current_user.id if current_user else None
+    role = current_user.role if current_user else None
+
+    gids_list: Optional[List[int]] = None
+    if group_ids:
+        try:
+            gids_list = [int(x) for x in group_ids.split(",") if x.strip()]
+        except Exception:
+            raise HTTPException(status_code=400, detail="bad_group_ids")
+
+    try:
+        items = PlaceService.list_places_feed(
+            db=db,
+            bbox=bbox,
+            scope=scope,
+            group_ids=gids_list,
+            current_user_id=uid,
+            current_user_role=role,
+        )
+        return {"items": items}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        if str(e) == "bad_scope":
+            raise HTTPException(status_code=400, detail="bad_scope")
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/places/bot")
 def create_place_bot(
     p: BotPlaceCreate,
