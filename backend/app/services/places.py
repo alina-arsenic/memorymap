@@ -6,6 +6,7 @@ from sqlalchemy import or_
 
 from app.models.models import User, Place, Media, Group
 from app.services.users import UserService
+from app.services.groups import GroupService
 from app.storage import presign_get, move_to_place_folder, delete_place_folder
 from app.core.config import MEDIA_LIMIT_PER_PLACE
 
@@ -29,13 +30,21 @@ class PlaceService:
 
         uid = UserService.ensure_user(db, user_id, tg_id, username)
 
+        group = db.query(Group).filter(Group.id == group_id).one_or_none()
+        if not group:
+            raise ValueError("group_not_found")
+
+        # Access control: non-public groups require owner/editor to add
+        user = db.query(User).filter(User.id == uid).one_or_none()
+        if not user:
+            raise ValueError("user_not_found")
+        GroupService.require_can_add_place(db, user, group)
+
         # Определяем статус модерации:
         # - публичная группа + обычный user → pending
         # - admin/moderator или приватная группа → approved
         moderation_status = "approved"
-        group = db.query(Group).filter(Group.id == group_id).one_or_none()
         if group and group.visibility == "public":
-            user = db.query(User).filter(User.id == uid).one_or_none()
             if user and user.role not in ("admin", "moderator"):
                 moderation_status = "pending"
 
@@ -85,6 +94,13 @@ class PlaceService:
         """
         left, bottom, right, top = [float(x) for x in bbox.split(",")]
 
+        group = db.query(Group).filter(Group.id == group_id).one_or_none()
+        if not group:
+            raise ValueError("group_not_found")
+
+        # Access control: non-public groups require membership (or admin/moderator)
+        GroupService.require_can_view(db, db.query(User).filter(User.id == current_user_id).one_or_none() if current_user_id else None, group)
+
         q = (
             db.query(Place, User)
             .outerjoin(User, Place.user_id == User.id)
@@ -96,7 +112,6 @@ class PlaceService:
         )
 
         # Фильтр модерации для публичных групп
-        group = db.query(Group).filter(Group.id == group_id).one_or_none()
         if group and group.visibility == "public":
             if current_user_role in ("admin", "moderator"):
                 # admin/moderator видят все точки, включая чужие pending

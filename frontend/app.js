@@ -10,6 +10,9 @@ let pendingPopupPlaceId = null; // placeId для открытия попапа 
 let tempMarker = null; // временный желтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
 
+// Friends UI state
+let outgoingPendingIds = new Set();
+
 async function apiFetch(path, { method = "GET", headers = {}, body = null } = {}) {
   const h = { ...headers };
   if (accessToken) h["Authorization"] = "Bearer " + accessToken;
@@ -214,6 +217,9 @@ async function loadMe() {
   // Друзья/уведомления
   refreshFriendsUI();
   updateNotifBadge();
+
+  // pre-load pending outgoing requests so the search button can show "Ждём ответ"
+  await loadFriendRequestsListsSafe();
 
 }
 
@@ -478,15 +484,42 @@ function refreshFriendsUI() {
       ].filter(Boolean).join(" • ")
     );
 
+    const displayName = u.login || u.username || `user#${u.id}`;
     return `
       <div class="list-item">
         <div class="meta">
           <div class="title">${title}</div>
           <div class="sub">${sub || ""}</div>
         </div>
+        <div class="actions">
+          <button class="btn btn-ghost btn-icon" title="Удалить из друзей" onclick="confirmRemoveFriend(${u.id}, '${escapeHtml(displayName)}')">✕</button>
+        </div>
       </div>
     `;
   }).join("");
+}
+
+async function confirmRemoveFriend(friendId, friendName) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+  const ok = confirm(`Точно хотите удалить из друзей ${friendName}?`);
+  if (!ok) return;
+
+  try {
+    const resp = await apiFetch(`/v1/friends/${friendId}`, { method: "DELETE" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось удалить из друзей: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    refreshFriendsUI();
+    // обновим поиск/инвайты тоже
+    outgoingPendingIds.delete(friendId);
+    updateNotifBadge();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети при удалении из друзей.");
+  }
 }
 
 async function uiSearchUsers() {
@@ -539,6 +572,8 @@ async function uiSearchUsers() {
       );
 
       const alreadyFriend = friendIds.has(u.id);
+      const pending = outgoingPendingIds.has(u.id);
+      const btnId = `fr-add-btn-${u.id}`;
       return `
         <div class="list-item">
           <div class="meta">
@@ -549,7 +584,9 @@ async function uiSearchUsers() {
             ${
               alreadyFriend
                 ? `<span class="hint">уже друг</span>`
-                : `<button class="btn btn-primary" onclick="sendFriendRequest(${u.id})">Добавить</button>`
+                : pending
+                  ? `<button id="${btnId}" class="btn btn-secondary" disabled>Ждём ответ</button>`
+                  : `<button id="${btnId}" class="btn btn-primary" onclick="sendFriendRequest(${u.id})">Добавить</button>`
             }
           </div>
         </div>
@@ -564,6 +601,16 @@ async function uiSearchUsers() {
 async function sendFriendRequest(toUserId) {
   if (!accessToken) { alert("Сначала войдите."); return; }
 
+  // Optimistic UI: disable the button right away
+  const btn = document.getElementById(`fr-add-btn-${toUserId}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.remove("btn-primary");
+    btn.classList.add("btn-secondary");
+    btn.innerText = "Ждём ответ";
+  }
+  outgoingPendingIds.add(toUserId);
+
   try {
     const resp = await apiFetch("/v1/friends/requests", {
       method: "POST",
@@ -573,16 +620,49 @@ async function sendFriendRequest(toUserId) {
 
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
+      outgoingPendingIds.delete(toUserId);
+      if (btn) {
+        btn.disabled = false;
+        btn.classList.remove("btn-secondary");
+        btn.classList.add("btn-primary");
+        btn.innerText = "Добавить";
+      }
       alert("Не удалось отправить приглашение: " + (data.detail || resp.status));
       return;
     }
 
-    alert("Приглашение отправлено.");
-    await refreshUserSnapshot(); // обновим счетчики и списки
-    uiSearchUsers(); // перерисуем результаты поиска (кнопка станет неактивной/уже друг)
+    // backend might auto-accept reverse request
+    if (data.status === "accepted_by_reverse_request") {
+      outgoingPendingIds.delete(toUserId);
+      alert("Запрос был принят автоматически (встречное приглашение). Теперь вы друзья.");
+    } else if (data.status === "already_friends") {
+      outgoingPendingIds.delete(toUserId);
+      alert("Вы уже друзья.");
+    } else {
+      alert("Приглашение отправлено.");
+    }
+
+    await refreshUserSnapshot();
+    await loadFriendRequestsListsSafe();
+    uiSearchUsers();
   } catch (e) {
     console.error(e);
+    outgoingPendingIds.delete(toUserId);
     alert("Ошибка сети при отправке приглашения.");
+  }
+}
+
+async function loadFriendRequestsListsSafe() {
+  // helper: refresh outgoing pending set without requiring modal to be open
+  if (!accessToken) return;
+  try {
+    const outResp = await apiFetch("/v1/friends/requests?outbox=1&status=pending");
+    const outData = await outResp.json().catch(() => ({}));
+    if (!outResp.ok) return;
+    const items = Array.isArray(outData.items) ? outData.items : [];
+    outgoingPendingIds = new Set(items.map(r => r.to_user?.id).filter(Boolean));
+  } catch (_) {
+    // ignore
   }
 }
 
@@ -675,6 +755,10 @@ async function loadFriendRequestsLists() {
     if (!outResp.ok) {
       outbox.innerHTML = `<div class="hint">Ошибка: ${escapeHtml(outData.detail || String(outResp.status))}</div>`;
     } else {
+      // refresh outgoing pending set
+      const outItems = Array.isArray(outData.items) ? outData.items : [];
+      outgoingPendingIds = new Set(outItems.map(r => r.to_user?.id).filter(Boolean));
+
       const items = Array.isArray(outData.items) ? outData.items : [];
       if (items.length === 0) {
         outbox.innerHTML = `<div class="hint">Нет исходящих приглашений.</div>`;

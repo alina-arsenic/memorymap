@@ -109,6 +109,41 @@ class FriendsService:
         return {"status": "pending", "request_id": req.id}
 
     @staticmethod
+    def remove_friendship(db: Session, current_user: User, other_user_id: int) -> Dict:
+        """Remove mutual friendship and cancel any pending requests between users."""
+        if current_user.id == other_user_id:
+            raise ValueError("Cannot remove yourself")
+
+        other = db.query(User).filter(User.id == other_user_id).one_or_none()
+        if not other:
+            raise ValueError("User not found")
+
+        u1, u2 = _pair(current_user.id, other_user_id)
+        fr = db.query(Friendship).filter(
+            Friendship.user1_id == u1,
+            Friendship.user2_id == u2,
+        ).one_or_none()
+        if fr:
+            db.delete(fr)
+
+        # Cancel any pending requests between the pair
+        reqs = db.query(FriendRequest).filter(
+            or_(
+                and_(FriendRequest.from_user_id == current_user.id, FriendRequest.to_user_id == other_user_id),
+                and_(FriendRequest.from_user_id == other_user_id, FriendRequest.to_user_id == current_user.id),
+            )
+        ).all()
+        now = datetime.now(timezone.utc)
+        for r in reqs:
+            if r.status == "pending":
+                r.status = "canceled"
+                r.responded_at = now
+                db.add(r)
+
+        db.commit()
+        return {"status": "removed"}
+
+    @staticmethod
     def list_requests(
         db: Session,
         user: User,

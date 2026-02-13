@@ -21,6 +21,20 @@ def list_friends(
         raise HTTPException(status_code=401, detail="Not authenticated")
     return {"items": FriendsService.list_friends(db, current_user)}
 
+
+@router.delete("/friends/{other_user_id}")
+def delete_friend(
+    other_user_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        return FriendsService.remove_friendship(db, current_user, other_user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/friends/requests")
 def create_request(
     req: CreateFriendRequest,
