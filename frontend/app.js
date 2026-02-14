@@ -58,13 +58,43 @@ wrapper.innerHTML = svg.trim();
 return wrapper.firstChild; // сам <svg>
 }
 
+/** Переключиться на форму входа */
+function showLoginForm() {
+  const login = document.getElementById("login-form");
+  const reg = document.getElementById("register-form");
+  const verify = document.getElementById("verify-form");
+  if (login) login.style.display = "";
+  if (reg) reg.style.display = "none";
+  if (verify) verify.style.display = "none";
+}
+
+/** Переключиться на форму регистрации */
+function showRegisterForm() {
+  const login = document.getElementById("login-form");
+  const reg = document.getElementById("register-form");
+  const verify = document.getElementById("verify-form");
+  if (login) login.style.display = "none";
+  if (reg) reg.style.display = "";
+  if (verify) verify.style.display = "none";
+}
+
 function applyAuthUI(isAuthed) {
-  const authForm = document.getElementById("auth-form");
+  const loginForm = document.getElementById("login-form");
+  const registerForm = document.getElementById("register-form");
+  const verifyForm = document.getElementById("verify-form");
   const logoutBtn = document.getElementById("logout-btn");
   const authedOnly = document.getElementById("authed-only");
 
-  if (authForm) authForm.style.display = isAuthed ? "none" : "";
+  if (isAuthed) {
+    if (loginForm) loginForm.style.display = "none";
+    if (registerForm) registerForm.style.display = "none";
+    if (verifyForm) verifyForm.style.display = "none";
+  } else {
+    showLoginForm();
+  }
+  const deleteBtn = document.getElementById("delete-account-btn");
   if (logoutBtn) logoutBtn.style.display = isAuthed ? "" : "none";
+  if (deleteBtn) deleteBtn.style.display = isAuthed ? "" : "none";
   if (authedOnly) authedOnly.style.display = isAuthed ? "" : "none";
 
 
@@ -232,7 +262,7 @@ async function loadMe() {
 
 async function uiLogin() {
   const login = (document.getElementById("login-input").value || "").trim();
-  const password = document.getElementById("password-input").value || "";
+  const password = document.getElementById("login-password-input").value || "";
 
   if (!login || !password) {
     alert("Введите логин и пароль.");
@@ -267,9 +297,9 @@ async function uiLogin() {
 let _pendingVerifyEmail = null;
 
 async function uiRegister() {
-  const login = (document.getElementById("login-input").value || "").trim();
-  const email = (document.getElementById("email-input").value || "").trim();
-  const password = document.getElementById("password-input").value || "";
+  const login = (document.getElementById("reg-login-input").value || "").trim();
+  const email = (document.getElementById("reg-email-input").value || "").trim();
+  const password = document.getElementById("reg-password-input").value || "";
 
   if (!login || !password || !email) {
     alert("Заполните логин, email и пароль.");
@@ -308,7 +338,7 @@ async function uiRegister() {
 
   // показываем форму подтверждения email
   _pendingVerifyEmail = email;
-  document.getElementById("auth-form").style.display = "none";
+  document.getElementById("register-form").style.display = "none";
   document.getElementById("verify-form").style.display = "";
   document.getElementById("verify-email-display").innerText = email;
   document.getElementById("verify-status").innerText = "";
@@ -341,7 +371,7 @@ async function uiVerifyEmail() {
   // email подтверждён — скрываем форму верификации, показываем логин
   _pendingVerifyEmail = null;
   document.getElementById("verify-form").style.display = "none";
-  document.getElementById("auth-form").style.display = "";
+  document.getElementById("login-form").style.display = "";
   document.getElementById("verify-code-input").value = "";
 
   alert("Email подтверждён! Теперь войдите в аккаунт.");
@@ -386,10 +416,18 @@ function uiLogout() {
   if (tgStatus) tgStatus.innerText = "";
   if (tgCode) tgCode.innerText = "";
 
+  // очищаем поля логина и регистрации
   const loginInput = document.getElementById("login-input");
-  const passInput = document.getElementById("password-input");
+  const loginPass = document.getElementById("login-password-input");
   if (loginInput) loginInput.value = "";
-  if (passInput) passInput.value = "";
+  if (loginPass) loginPass.value = "";
+
+  const regLogin = document.getElementById("reg-login-input");
+  const regEmail = document.getElementById("reg-email-input");
+  const regPass = document.getElementById("reg-password-input");
+  if (regLogin) regLogin.value = "";
+  if (regEmail) regEmail.value = "";
+  if (regPass) regPass.value = "";
 
   // убрать временный маркер и сбросить координаты
   if (tempMarker) {
@@ -405,6 +443,36 @@ function uiLogout() {
   if (statusEl) statusEl.innerText = "Сначала войдите, чтобы добавлять точки.";
 
   refresh();
+}
+
+// --- Удаление аккаунта ---
+
+function openDeleteAccountModal() {
+  document.getElementById("delete-account-overlay").style.display = "flex";
+}
+
+function closeDeleteAccountModal() {
+  document.getElementById("delete-account-overlay").style.display = "none";
+}
+
+function closeDeleteAccountModalOnOverlay(e) {
+  if (e.target === e.currentTarget) closeDeleteAccountModal();
+}
+
+async function confirmDeleteAccount() {
+  const resp = await fetch(`${API_BASE}/v1/me`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!resp.ok) {
+    alert("Не удалось удалить аккаунт.");
+    return;
+  }
+
+  closeDeleteAccountModal();
+  uiLogout();
+  alert("Аккаунт успешно удалён.");
 }
 
 async function startTelegramLink() {
