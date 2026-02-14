@@ -27,6 +27,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 # ---------- FSM ----------
 class AddPoint(StatesGroup):
+    waiting_group = State()
     waiting_title = State()
     waiting_note = State()
     waiting_photo = State()
@@ -154,27 +155,18 @@ async def link_account(m: types.Message):
         else:
             await m.reply(f"Ошибка привязки (код {r.status_code}).")
 
-# ---------- Location handler: create point ----------
+# ---------- Location handler: запрос выбора группы ----------
 @dp.message(F.location)
 async def on_location(m: types.Message, state: FSMContext):
     lat = m.location.latitude
     lon = m.location.longitude
 
-    payload = {
-        "group_id": 1,
-        "tg_id": m.from_user.id,
-        "username": m.from_user.username,
-        "title": None,
-        "note": "",
-        "lat": lat,
-        "lon": lon,
-        "media_keys": [],
-    }
-
-    r = requests.post(
-        f"{API_BASE}/v1/places/bot",
-        json=payload,
+    # Запрашиваем список доступных групп через backend
+    r = requests.get(
+        f"{API_BASE}/v1/bot/groups",
+        params={"tg_id": m.from_user.id},
         headers={"X-Bot-Secret": BOT_API_SECRET},
+        timeout=10,
     )
 
     if r.status_code == 400 and r.json().get("detail") == "telegram_not_linked":
@@ -187,20 +179,81 @@ async def on_location(m: types.Message, state: FSMContext):
         return
 
     if not r.ok:
-        await m.reply(f"Не удалось создать точку (код {r.status_code})")
+        await m.reply(f"Не удалось получить список групп (код {r.status_code})")
+        return
+
+    groups = r.json().get("items", [])
+    if not groups:
+        await m.reply("Нет доступных групп для добавления точки.")
+        return
+
+    # Сохраняем координаты и username в FSM
+    await state.clear()
+    await state.update_data(lat=lat, lon=lon, username=m.from_user.username, tg_id=m.from_user.id)
+
+    # Формируем inline-кнопки выбора группы
+    buttons = []
+    for g in groups:
+        label = g["name"]
+        buttons.append([InlineKeyboardButton(
+            text=label,
+            callback_data=f"select_group:{g['id']}",
+        )])
+
+    await m.reply(
+        "Куда добавить точку?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await state.set_state(AddPoint.waiting_group)
+
+
+# ---------- Callback: выбор группы → создание точки ----------
+@dp.callback_query(AddPoint.waiting_group, F.data.startswith("select_group:"))
+async def cb_select_group(c: types.CallbackQuery, state: FSMContext):
+    group_id = int(c.data.split(":")[1])
+    data = await state.get_data()
+
+    payload = {
+        "group_id": group_id,
+        "tg_id": data["tg_id"],
+        "username": data.get("username"),
+        "title": None,
+        "note": "",
+        "lat": data["lat"],
+        "lon": data["lon"],
+        "media_keys": [],
+    }
+
+    r = requests.post(
+        f"{API_BASE}/v1/places/bot",
+        json=payload,
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        timeout=10,
+    )
+
+    if not r.ok:
+        await c.message.edit_text(f"Не удалось создать точку (код {r.status_code})")
+        await state.clear()
+        await c.answer()
         return
 
     pid = r.json().get("id")
 
-    # начинаем новый сеанс редактирования точки
-    await state.clear()
+    # Начинаем сеанс редактирования точки
     await state.update_data(point_id=pid)
 
+    # Удаляем сообщение с выбором группы и показываем меню
+    try:
+        await c.message.delete()
+    except Exception:
+        pass
+
     await show_menu(
-        chat_id=m.chat.id,
+        chat_id=c.message.chat.id,
         state=state,
-        text=f"Точка создана (id {pid}). Выберите, что хотите сделать:"
+        text=f"Точка создана (id {pid}). Выберите, что хотите сделать:",
     )
+    await c.answer()
 
 
 # ---------- Callback: menu actions ----------
