@@ -242,3 +242,43 @@ class GroupService:
             {"uid": user_id, "gid": group_id, "role": role},
         )
         db.commit()
+
+
+    @staticmethod
+    def leave_group(db: Session, user: User, group_id: int) -> None:
+        """Leave a group (for non-owners)."""
+        role = GroupService._get_membership_role(db, user.id, group_id)
+        if role is None:
+            raise ValueError("not_a_member")
+        if role == "owner":
+            raise ValueError("owner_cannot_leave")
+        db.execute(text("DELETE FROM membership WHERE user_id=:uid AND group_id=:gid"), {"uid": user.id, "gid": group_id})
+        db.commit()
+
+    @staticmethod
+    def delete_group(db: Session, owner: User, group_id: int) -> None:
+        """Delete a group and all its places. Only group owner (or admin) can delete.
+        Public groups cannot be deleted via this endpoint.
+        """
+        g = db.query(Group).filter(Group.id == group_id).one_or_none()
+        if not g:
+            raise ValueError("group_not_found")
+        if g.visibility == "public":
+            raise ValueError("cannot_delete_public_group")
+        # permission: owner or admin
+        GroupService.require_is_owner(db, owner, group_id)
+
+        # Gather place ids for S3 cleanup
+        place_rows = db.execute(text("SELECT id FROM places WHERE group_id=:gid"), {"gid": group_id}).fetchall()
+        place_ids = [int(r[0]) for r in place_rows]
+
+        # Delete media rows (db cascades via place_id on media, but explicit ok)
+        db.execute(text("DELETE FROM media WHERE place_id IN (SELECT id FROM places WHERE group_id=:gid)"), {"gid": group_id})
+        db.execute(text("DELETE FROM places WHERE group_id=:gid"), {"gid": group_id})
+        db.execute(text("DELETE FROM membership WHERE group_id=:gid"), {"gid": group_id})
+        db.execute(text("DELETE FROM groups WHERE id=:gid"), {"gid": group_id})
+        db.commit()
+
+        # S3 cleanup done by API layer (needs storage functions)
+        # Return place_ids so caller can delete folders.
+        return place_ids

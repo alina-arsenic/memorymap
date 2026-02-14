@@ -621,7 +621,7 @@ function renderGroupLayersUI() {
       </div>`
     );
   } else {
-    parts.push(`<div class="hint">Личный слой появится после первого захода в аккаунт.</div>`);
+    parts.push(`<div class="hint">Личный слой сейчас не создаётся автоматически. Если вам нужен личный слой — создайте приватный слой и используйте его только для себя.</div>`);
   }
 
   for (const g of layerGroups) {
@@ -640,7 +640,7 @@ function renderGroupLayersUI() {
           </div>
         </div>
         <div class="actions">
-          ${canEdit ? `<button class="btn btn-ghost btn-icon" title="Настроить слой" onclick="openEditLayerModal(${g.id})">⚙</button>` : ``}
+          ${`<button class="btn btn-ghost btn-icon" title="Открыть" onclick="openEditLayerModal(${g.id})">⚙</button>`}
         </div>
       </div>`
     );
@@ -879,6 +879,14 @@ async function openEditLayerModal(groupId) {
       <div class="list" style="margin-top:8px;">${membersHtml || `<div class="hint">Нет участников.</div>`}</div>
       ${isPersonal ? `<div class="hint" style="margin-top:10px;">Личный слой не поддерживает совместное редактирование.</div>` : addSection}
       <div id="layer-edit-status" class="hint" style="margin-top:10px;"></div>
+      <div class="divider" style="margin:12px 0;"></div>
+      <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;">
+        ${(!isPersonal && !isOwner) ? `<button class="btn" onclick="leaveLayer(${groupId})">Выйти из слоя</button>` : ``}
+        <div style="display:flex;gap:8px;margin-left:auto;">
+          ${(!isPersonal && isOwner) ? `<button class="btn btn-danger" onclick="deleteLayer(${groupId})">Удалить слой</button>` : ``}
+        </div>
+      </div>
+
     `);
 
   } catch (e) {
@@ -2221,3 +2229,54 @@ function maybeRefreshSearchResults() {
 
 map.on("load", refresh);
 map.on("moveend", refresh);
+
+// --- Layer destructive actions ---
+async function leaveLayer(groupId) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!confirm("Точно выйти из слоя?")) return;
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}/leave`, { method: "POST" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось выйти: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    if (selectedGroupLayerIds.has(groupId)) selectedGroupLayerIds.delete(groupId);
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    closeLayersModal();
+    refresh();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
+
+async function deleteLayer(groupId) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+  let name = `слой ${groupId}`;
+  try {
+    const g = ((currentUser && currentUser.groups) || []).find(x => x.id === groupId);
+    if (g && (g.name || g.title)) name = g.name || g.title;
+  } catch (_) {}
+
+  if (!confirm(`Точно хотите удалить слой "${name}"? Все точки этого слоя будут удалены.`)) return;
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}`, { method: "DELETE" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось удалить слой: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    if (selectedGroupLayerIds.has(groupId)) selectedGroupLayerIds.delete(groupId);
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    closeLayersModal();
+    refresh();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}

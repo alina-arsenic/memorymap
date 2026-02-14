@@ -1,7 +1,6 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.core.auth import _ensure_personal_group  # чтобы сразу завести личную группу
 from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
 from app.core.deps import get_db
 from app.models.models import Media, TelegramLinkCode, User
@@ -51,11 +50,6 @@ def bot_link_telegram(
 
     row.used_at = now
     db.commit()
-
-    # личная группа
-    _ensure_personal_group(db, user)
-    db.commit()
-
     return {"status": "ok", "user_id": user.id, "tg_id": user.tg_id}
 
 @router.get("/bot/groups")

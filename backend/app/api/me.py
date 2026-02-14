@@ -35,10 +35,7 @@ def me(
     db: Session = Depends(get_db),
 ):
     if current_user is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    # Ensure personal private layer exists
-    GroupService.ensure_personal_group(db, current_user)
+        raise HTTPException(status_code=401, detail="Not authenticated") 
 
     groups = GroupService.list_groups(db, current_user)
     friends = UserService.list_friends(db, current_user)
