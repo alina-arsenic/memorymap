@@ -621,7 +621,7 @@ function renderGroupLayersUI() {
       </div>`
     );
   } else {
-    parts.push(`<div class="hint">Личный слой сейчас не создаётся автоматически. Если вам нужен личный слой — создайте приватный слой и используйте его только для себя.</div>`);
+    parts.push(`<div class="hint"></div>`);
   }
 
   for (const g of layerGroups) {
