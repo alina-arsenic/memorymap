@@ -1,17 +1,14 @@
-from typing import Optional, List, Dict
-from fastapi import APIRouter, Depends, HTTPException, Body, Header
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from typing import List, Optional
 
-from app.core.deps import get_db
 from app.core.auth import get_current_user
-from app.core.config import MEDIA_LIMIT_PER_PLACE
-from app.models.models import User, Place, Media
+from app.core.config import BOT_API_SECRET
+from app.core.deps import get_db
+from app.models.models import Media, Place, User
 from app.services.places import PlaceService
 from app.storage import move_to_place_folder
-from app.core.config import BOT_API_SECRET
-from app.services.users import UserService
-
+from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 
@@ -42,24 +39,98 @@ def create_place(
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    pid = PlaceService.create_place(
-        db=db,
-        group_id=p.group_id,
-        user_id=current_user.id,
-        tg_id=None,
-        username=None,
-        title=p.title,
-        note=p.note,
-        lat=p.lat,
-        lon=p.lon,
-        media_keys=p.media_keys,
-    )
-    return {"id": pid}
+    try:
+        pid = PlaceService.create_place(
+            db=db,
+            group_id=p.group_id,
+            user_id=current_user.id,
+            tg_id=None,
+            username=None,
+            title=p.title,
+            note=p.note,
+            lat=p.lat,
+            lon=p.lon,
+            media_keys=p.media_keys,
+        )
+        return {"id": pid}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        # known: group_not_found, media_limit
+        if str(e) == "group_not_found":
+            raise HTTPException(status_code=404, detail="group_not_found")
+        if str(e) == "media_limit":
+            raise HTTPException(status_code=400, detail="media_limit")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 
 @router.get("/places")
-def list_places(group_id: int, bbox: str, db: Session = Depends(get_db)):
-    items = PlaceService.list_places(db=db, group_id=group_id, bbox=bbox)
-    return {"items": items}
+def list_places(
+    group_id: int,
+    bbox: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    uid = current_user.id if current_user else None
+    role = current_user.role if current_user else None
+    try:
+        items = PlaceService.list_places(
+            db=db,
+            group_id=group_id,
+            bbox=bbox,
+            current_user_id=uid,
+            current_user_role=role,
+        )
+        return {"items": items}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        if str(e) == "group_not_found":
+            raise HTTPException(status_code=404, detail="group_not_found")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/places/feed")
+def list_places_feed(
+    bbox: str,
+    scope: str = "all",
+    group_ids: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch places across accessible groups.
+
+    - bbox: "left,bottom,right,top"
+    - scope: all|mine
+    - group_ids: optional comma-separated list of group ids to restrict
+    """
+    uid = current_user.id if current_user else None
+    role = current_user.role if current_user else None
+
+    gids_list: Optional[List[int]] = None
+    if group_ids:
+        try:
+            gids_list = [int(x) for x in group_ids.split(",") if x.strip()]
+        except Exception:
+            raise HTTPException(status_code=400, detail="bad_group_ids")
+
+    try:
+        items = PlaceService.list_places_feed(
+            db=db,
+            bbox=bbox,
+            scope=scope,
+            group_ids=gids_list,
+            current_user_id=uid,
+            current_user_role=role,
+        )
+        return {"items": items}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        if str(e) == "bad_scope":
+            raise HTTPException(status_code=400, detail="bad_scope")
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/places/bot")
 def create_place_bot(
@@ -94,9 +165,13 @@ def create_place_bot(
             media_keys=p.media_keys,
         )
         return {"id": pid}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         if str(e) == "media_limit":
             raise HTTPException(status_code=400, detail="media_limit")
+        if str(e) == "group_not_found":
+            raise HTTPException(status_code=404, detail="group_not_found")
         raise
 
 @router.patch("/places/{place_id}")

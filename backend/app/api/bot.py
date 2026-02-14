@@ -1,14 +1,14 @@
+import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Header
+
+from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
+from app.core.deps import get_db
+from app.models.models import Media, TelegramLinkCode, User
+from app.services.groups import GroupService
+from app.storage import presign_put
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import uuid
-
-from app.storage import presign_put
-from app.core.deps import get_db
-from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
-from app.models.models import User, TelegramLinkCode, Media
-from app.core.auth import _ensure_personal_group  # чтобы сразу завести личную группу
 
 router = APIRouter()
 
@@ -50,12 +50,39 @@ def bot_link_telegram(
 
     row.used_at = now
     db.commit()
-
-    # личная группа
-    _ensure_personal_group(db, user)
-    db.commit()
-
     return {"status": "ok", "user_id": user.id, "tg_id": user.tg_id}
+
+@router.get("/bot/groups")
+def bot_list_groups(
+    tg_id: int = Query(...),
+    x_bot_secret: str | None = Header(default=None, alias="X-Bot-Secret"),
+    db: Session = Depends(get_db),
+):
+    """Список групп, в которые пользователь может добавлять точки (для бота)."""
+    if not BOT_API_SECRET or x_bot_secret != BOT_API_SECRET:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    user = db.query(User).filter(User.tg_id == tg_id).one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="telegram_not_linked")
+
+    all_groups = GroupService.list_groups(db, user)
+
+    # Оставляем только группы, куда пользователь может добавлять точки:
+    # публичные + те, где роль owner или editor
+    items = []
+    for g in all_groups:
+        role = g.get("my_role")
+        vis = g.get("visibility")
+        if vis == "public" or role in ("owner", "editor"):
+            items.append({
+                "id": g["id"],
+                "name": g["name"],
+                "is_personal": g.get("is_personal", False),
+            })
+
+    return {"items": items}
+
 
 @router.post("/bot/media/presign-upload")
 def bot_presign_upload(

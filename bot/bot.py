@@ -1,12 +1,16 @@
-import os, asyncio, logging, requests, socket
-from aiohttp import TCPConnector
+import asyncio
+import logging
+import os
 from urllib.parse import urlparse, urlunparse
+
+import requests
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_BASE = os.getenv("APP_BASE_URL", "http://api:8000")
@@ -23,6 +27,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 # ---------- FSM ----------
 class AddPoint(StatesGroup):
+    waiting_group = State()
     waiting_title = State()
     waiting_note = State()
     waiting_photo = State()
@@ -70,6 +75,47 @@ async def show_menu(chat_id: int, state: FSMContext, text: str):
 
 
 # ---------- Commands ----------
+
+@dp.message(CommandStart())
+async def cmd_start(m: types.Message, command: CommandObject):
+    """Обработчик /start. Если передан deep_link код — привязываем Telegram."""
+    code = command.args  # текст после /start (None если просто /start)
+
+    if not code:
+        await m.reply(
+            "Привет! Я бот MemoryMap.\n\n"
+            "Отправьте мне геолокацию, чтобы сохранить место на карте.\n"
+            "Для привязки аккаунта используйте ссылку с сайта."
+        )
+        return
+
+    # deep link: /start <code> — привязка Telegram к аккаунту
+    if not BOT_API_SECRET:
+        await m.reply("Бот не настроен: нет BOT_API_SECRET.")
+        return
+
+    r = requests.post(
+        f"{API_BASE}/v1/bot/link-telegram",
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        json={"code": code, "tg_id": m.from_user.id},
+        timeout=10,
+    )
+
+    if r.ok:
+        await m.reply(
+            "Готово! Telegram привязан к вашему профилю.\n"
+            "Теперь вы можете отправлять геолокацию для создания точек."
+        )
+    elif r.status_code == 400:
+        await m.reply("Код истёк. Сгенерируйте новый на сайте.")
+    elif r.status_code == 404:
+        await m.reply("Код не найден. Попробуйте сгенерировать новый на сайте.")
+    elif r.status_code == 409:
+        await m.reply("Код уже использован или этот Telegram уже привязан к другому аккаунту.")
+    else:
+        await m.reply(f"Ошибка привязки (код {r.status_code}).")
+
+
 @dp.message(F.text == "/whoami")
 async def whoami(m: types.Message):
     await m.reply(
@@ -109,27 +155,18 @@ async def link_account(m: types.Message):
         else:
             await m.reply(f"Ошибка привязки (код {r.status_code}).")
 
-# ---------- Location handler: create point ----------
+# ---------- Location handler: запрос выбора группы ----------
 @dp.message(F.location)
 async def on_location(m: types.Message, state: FSMContext):
     lat = m.location.latitude
     lon = m.location.longitude
 
-    payload = {
-        "group_id": 1,
-        "tg_id": m.from_user.id,
-        "username": m.from_user.username,
-        "title": None,
-        "note": "",
-        "lat": lat,
-        "lon": lon,
-        "media_keys": [],
-    }
-
-    r = requests.post(
-        f"{API_BASE}/v1/places/bot",
-        json=payload,
+    # Запрашиваем список доступных групп через backend
+    r = requests.get(
+        f"{API_BASE}/v1/bot/groups",
+        params={"tg_id": m.from_user.id},
         headers={"X-Bot-Secret": BOT_API_SECRET},
+        timeout=10,
     )
 
     if r.status_code == 400 and r.json().get("detail") == "telegram_not_linked":
@@ -142,20 +179,81 @@ async def on_location(m: types.Message, state: FSMContext):
         return
 
     if not r.ok:
-        await m.reply(f"Не удалось создать точку (код {r.status_code})")
+        await m.reply(f"Не удалось получить список групп (код {r.status_code})")
+        return
+
+    groups = r.json().get("items", [])
+    if not groups:
+        await m.reply("Нет доступных групп для добавления точки.")
+        return
+
+    # Сохраняем координаты и username в FSM
+    await state.clear()
+    await state.update_data(lat=lat, lon=lon, username=m.from_user.username, tg_id=m.from_user.id)
+
+    # Формируем inline-кнопки выбора группы
+    buttons = []
+    for g in groups:
+        label = g["name"]
+        buttons.append([InlineKeyboardButton(
+            text=label,
+            callback_data=f"select_group:{g['id']}",
+        )])
+
+    await m.reply(
+        "Куда добавить точку?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await state.set_state(AddPoint.waiting_group)
+
+
+# ---------- Callback: выбор группы → создание точки ----------
+@dp.callback_query(AddPoint.waiting_group, F.data.startswith("select_group:"))
+async def cb_select_group(c: types.CallbackQuery, state: FSMContext):
+    group_id = int(c.data.split(":")[1])
+    data = await state.get_data()
+
+    payload = {
+        "group_id": group_id,
+        "tg_id": data["tg_id"],
+        "username": data.get("username"),
+        "title": None,
+        "note": "",
+        "lat": data["lat"],
+        "lon": data["lon"],
+        "media_keys": [],
+    }
+
+    r = requests.post(
+        f"{API_BASE}/v1/places/bot",
+        json=payload,
+        headers={"X-Bot-Secret": BOT_API_SECRET},
+        timeout=10,
+    )
+
+    if not r.ok:
+        await c.message.edit_text(f"Не удалось создать точку (код {r.status_code})")
+        await state.clear()
+        await c.answer()
         return
 
     pid = r.json().get("id")
 
-    # начинаем новый сеанс редактирования точки
-    await state.clear()
+    # Начинаем сеанс редактирования точки
     await state.update_data(point_id=pid)
 
+    # Удаляем сообщение с выбором группы и показываем меню
+    try:
+        await c.message.delete()
+    except Exception:
+        pass
+
     await show_menu(
-        chat_id=m.chat.id,
+        chat_id=c.message.chat.id,
         state=state,
-        text=f"Точка создана (id {pid}). Выберите, что хотите сделать:"
+        text=f"Точка создана (id {pid}). Выберите, что хотите сделать:",
     )
+    await c.answer()
 
 
 # ---------- Callback: menu actions ----------

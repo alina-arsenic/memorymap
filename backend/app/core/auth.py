@@ -1,11 +1,12 @@
 from typing import Optional
-from fastapi import Header, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from app.core.deps import get_db
-from app.models.models import User, Group
 from app.core.jwt import decode_access_token
+from app.models.models import Group, User
+from fastapi import Depends, Header
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 
 def _ensure_personal_group(db: Session, user: User) -> None:
     name = f"Личная карта {user.tg_id or user.id}"

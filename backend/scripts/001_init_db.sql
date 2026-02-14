@@ -10,8 +10,11 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS groups (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
-  visibility TEXT NOT NULL DEFAULT 'private'  -- private | friends | public
+  visibility TEXT NOT NULL DEFAULT 'private',  -- private | friends | public
+  owner_id INT REFERENCES users(id) ON DELETE SET NULL,
+  is_personal BOOLEAN NOT NULL DEFAULT FALSE
 );
+
 
 CREATE TABLE IF NOT EXISTS membership (
   user_id INT REFERENCES users(id) ON DELETE CASCADE,
@@ -69,3 +72,6 @@ SELECT setval(
   COALESCE((SELECT MAX(id) FROM groups), 1),
   true
 );
+
+-- One personal group per owner
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_personal_group_per_owner ON groups (owner_id) WHERE is_personal = TRUE;

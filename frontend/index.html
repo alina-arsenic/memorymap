@@ -1,145 +1,365 @@
 <!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MemoryMap</title>
-  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css" />
-</head>
-<body>
-<div class="app">
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
-    <div>
-      <h1>MemoryMap</h1>
-      <div class="subtitle">
-        Карта значимых мест
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MemoryMap</title>
+    <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <!-- SIDEBAR -->
+      <aside class="sidebar">
+        <div>
+          <h1>MemoryMap</h1>
+          <div class="subtitle">Карта значимых мест</div>
+        </div>
+
+        <div class="card">
+          <div class="userbar">
+            <div class="sidebar-section-title" id="user-title">Пользователь</div>
+            <button
+              id="notif-btn"
+              class="icon-btn"
+              title="Уведомления"
+              onclick="openFriendRequestsModal()"
+              style="display: none"
+            >
+              <span class="icon-bell" aria-hidden="true">🔔</span>
+              <span id="notif-badge" class="badge" style="display: none">0</span>
+            </button>
+          </div>
+          <!-- ФОРМА ВХОДА (по умолчанию видна) -->
+          <div id="login-form">
+            <div class="field-label">Логин</div>
+            <input id="login-input" class="input" />
+
+            <div class="field-label" style="margin-top: 6px">Пароль</div>
+            <input id="login-password-input" type="password" class="input" />
+
+            <div style="margin-top: 6px; text-align: right">
+              <button class="btn btn-primary" onclick="uiLogin()">Войти</button>
+            </div>
+            <div class="hint" style="margin-top: 8px; text-align: right">
+              Ещё нет аккаунта?
+              <a
+                href="#"
+                onclick="
+                  showRegisterForm();
+                  return false;
+                "
+                >Зарегистрироваться</a
+              >
+            </div>
+          </div>
+
+          <!-- ФОРМА РЕГИСТРАЦИИ (скрыта по умолчанию) -->
+          <div id="register-form" style="display: none">
+            <div class="field-label">Логин</div>
+            <input id="reg-login-input" class="input" />
+
+            <div class="field-label" style="margin-top: 6px">Email</div>
+            <input id="reg-email-input" class="input" type="email" />
+
+            <div class="field-label" style="margin-top: 6px">Пароль</div>
+            <input id="reg-password-input" type="password" class="input" />
+
+            <div style="margin-top: 6px; text-align: right">
+              <button class="btn btn-primary" onclick="uiRegister()">Зарегистрироваться</button>
+            </div>
+            <div class="hint" style="margin-top: 8px; text-align: right">
+              Уже есть аккаунт?
+              <a
+                href="#"
+                onclick="
+                  showLoginForm();
+                  return false;
+                "
+                >Войти</a
+              >
+            </div>
+          </div>
+
+          <!-- ФОРМА ПОДТВЕРЖДЕНИЯ EMAIL (скрыта по умолчанию) -->
+          <div id="verify-form" style="display: none">
+            <div class="hint" style="margin-bottom: 6px">
+              Код подтверждения отправлен на <b id="verify-email-display"></b>
+            </div>
+            <div class="field-label">Код из письма</div>
+            <input id="verify-code-input" class="input" maxlength="6" placeholder="6 цифр" />
+            <div style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+              <button class="btn btn-primary" onclick="uiVerifyEmail()">Подтвердить</button>
+              <button class="btn" onclick="uiResendCode()">Отправить повторно</button>
+            </div>
+            <div id="verify-status" class="hint" style="margin-top: 6px"></div>
+          </div>
+
+          <!-- КНОПКА ВЫХОДА (видна только когда вошли) -->
+          <div style="margin-top: 6px">
+            <button id="logout-btn" class="btn" onclick="uiLogout()" style="display: none">
+              Выйти
+            </button>
+          </div>
+
+          <!-- ТУТ МЫ БУДЕМ ПИСАТЬ СТАТУС Telegram -->
+          <div id="tg-status" class="hint" style="margin-top: 8px"></div>
+
+          <!-- ПОДСКАЗКА про бота (скрываем, когда tg уже привязан) -->
+          <div id="tg-hint" class="hint" style="margin-top: 8px; display: none">
+            Хотите отправлять точки через Telegram?
+          </div>
+
+          <!-- КНОПКА генерации кода (скрываем, когда tg уже привязан) -->
+          <button
+            id="tg-link-btn"
+            class="btn"
+            style="margin-top: 6px; display: none"
+            onclick="startTelegramLink()"
+          >
+            Сгенерировать код привязки Telegram
+          </button>
+
+          <div id="tg-link-code" class="hint" style="margin-top: 6px; display: none"></div>
+        </div>
+
+        <div id="authed-only" style="display: none">
+          <!-- card "Слои" -->
+          <div class="card">
+            <div
+              class="sidebar-section-title"
+              style="display: flex; align-items: center; justify-content: space-between; gap: 8px"
+            >
+              <span>Слои</span>
+              <button class="btn" onclick="openCreateLayerModal()">+ Новый слой</button>
+            </div>
+
+            <div class="field-label" style="margin-top: 6px">Главные фильтры</div>
+            <div class="layers-list">
+              <label>
+                <input type="checkbox" id="layer-public" checked onchange="onLayerChange()" />
+                <span>Все точки (публичные)</span>
+              </label>
+              <label>
+                <input type="checkbox" id="layer-my" checked onchange="onLayerChange()" />
+                <span>Мои точки (в публичном)</span>
+              </label>
+            </div>
+
+            <div class="divider" style="margin: 10px 0"></div>
+
+            <div class="field-label">Личные и групповые слои</div>
+            <div id="group-layers-list" class="list" style="margin-top: 8px"></div>
+            <div class="hint" style="margin-top: 6px">
+              Слои — приватные карты (групповые), где вы можете добавлять редакторов. Личный слой сейчас не создаётся автоматически.
+            </div>
+          </div>
+          <div class="card">
+            <div class="sidebar-section-title">Друзья</div>
+
+            <div class="field-label">Поиск пользователей</div>
+            <div style="display: flex; gap: 6px; align-items: center">
+              <input
+                id="friends-search-input"
+                class="input"
+                placeholder="login / username / tg_id"
+                onkeydown="
+                  if (event.key === 'Enter') {
+                    uiSearchUsers();
+                  }
+                "
+              />
+              <button class="btn" onclick="uiSearchUsers()">Найти</button>
+            </div>
+            <div id="friends-search-status" class="hint" style="margin-top: 6px"></div>
+            <div id="friends-search-results" class="list" style="margin-top: 8px"></div>
+
+            <div class="divider" style="margin: 10px 0"></div>
+
+            <div class="field-label">Мои друзья</div>
+            <div id="friends-list" class="list" style="margin-top: 8px"></div>
+            <div class="hint" style="margin-top: 6px">
+              Дружба взаимная: пока другой пользователь не примет приглашение, он не появится в
+              списке.
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="sidebar-section-title">Добавление точек</div>
+            <div class="hint" style="margin-bottom: 8px">
+              Нажмите <b>правой кнопкой мыши</b> по карте - появится временный желтый пин.
+            </div>
+
+            <div class="field-label">Название</div>
+            <input id="web-title" class="input" placeholder="Или его отсутствие" />
+
+            <div class="field-label" style="margin-top: 6px">Описание</div>
+            <textarea
+              id="web-note"
+              class="input"
+              placeholder="Если есть желание - расскажите, что тут интересного"
+              rows="3"
+              style="resize: vertical"
+            ></textarea>
+
+            <div class="field-label" style="margin-top: 6px">Фотографии (до 12 шт.)</div>
+            <input id="web-photos" type="file" accept="image/*" multiple class="input" />
+
+            <div class="field-label" style="margin-top: 6px">Куда добавить (слой)</div>
+            <select id="web-group" class="input"></select>
+
+            <div class="field-label" style="margin-top: 6px">Координаты</div>
+            <div id="web-coords" class="hint">ПКМ по карте, чтобы выбрать точку.</div>
+
+            <button class="btn btn-primary" style="margin-top: 8px" onclick="addWebPoint()">
+              Добавить точку
+            </button>
+
+            <div id="web-add-status" class="hint" style="margin-top: 6px">
+              Выберите место на карте правой кнопкой мыши.
+            </div>
+
+            <div class="hint" style="margin-top: 8px">
+              Также можно добавить точку, отправив геолокацию боту <b>@memorymap_bot</b>.
+            </div>
+          </div>
+
+          <!-- ПАНЕЛЬ МОДЕРАЦИИ (только для admin/moderator) -->
+          <div id="moderation-panel" class="card" style="display: none">
+            <div class="sidebar-section-title">Модерация</div>
+            <div class="hint" style="margin-bottom: 6px">Точки, ожидающие проверки.</div>
+            <div id="moderation-list" class="scrollable-list"></div>
+            <button class="btn" style="margin-top: 6px" onclick="loadModerationQueue()">
+              Обновить
+            </button>
+          </div>
+
+          <!-- ПАНЕЛЬ АДМИНИСТРАТОРА (только для admin) -->
+          <div id="admin-panel" class="card" style="display: none">
+            <div class="sidebar-section-title">Управление пользователями</div>
+            <div class="hint" style="margin-bottom: 6px">Назначение ролей.</div>
+            <input
+              id="admin-search"
+              class="input"
+              placeholder="Поиск по логину или email"
+              oninput="filterAdminUsers()"
+              style="margin-bottom: 6px"
+            />
+            <div id="admin-users-list" class="scrollable-list"></div>
+            <button class="btn" style="margin-top: 6px" onclick="loadAdminUsers()">Обновить</button>
+          </div>
+
+          <!-- УДАЛЕНИЕ АККАУНТА (в самом низу сайдбара) -->
+          <div class="card" id="delete-account-btn" style="display: none">
+            <button class="btn btn-danger" onclick="openDeleteAccountModal()" style="width: 100%">
+              Удалить аккаунт
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- MAP -->
+      <main class="map-wrapper">
+        <div id="map"></div>
+
+        <div class="map-topbar">
+          <div class="map-topbar-left">
+            <div class="status-dot"></div>
+            <div class="status-text" id="status-text">Подключено к API</div>
+          </div>
+          <div class="map-topbar-right">
+            <span class="map-counter" id="points-counter">Точек: 0</span>
+            <button class="btn" onclick="refresh()">Обновить</button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+    <script src="/app.js" defer></script>
+    <div id="mm-edit-modal" class="mm-modal" style="display: none">
+      <div class="mm-modal-card">
+        <div class="mm-modal-title" id="mm-modal-title"></div>
+        <input id="mm-modal-input" class="input" style="display: none" />
+        <textarea
+          id="mm-modal-textarea"
+          class="input"
+          rows="6"
+          style="display: none; resize: vertical"
+        ></textarea>
+
+        <div class="mm-modal-actions">
+          <button class="btn" onclick="mmModalCancel()">Отмена</button>
+          <button class="btn btn-primary" onclick="mmModalSave()">Сохранить</button>
+        </div>
+      </div>
+    </div>
+    <input id="mm-photo-input" type="file" accept="image/*" multiple style="display: none" />
+    <!-- MODAL: Friend requests -->
+    <div
+      id="modal-overlay"
+      class="modal-overlay"
+      style="display: none"
+      onclick="closeModalOnOverlay(event)"
+    >
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-header">
+          <div id="modal-title" class="modal-title">Уведомления</div>
+          <button class="icon-btn" onclick="closeFriendRequestsModal()" title="Закрыть">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field-label">Входящие приглашения</div>
+          <div id="inbox-requests" class="list" style="margin-top: 8px"></div>
+
+          <div class="divider" style="margin: 12px 0"></div>
+
+          <div class="field-label">Исходящие приглашения</div>
+          <div id="outbox-requests" class="list" style="margin-top: 8px"></div>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-    <div class="sidebar-section-title" id="user-title">Пользователь</div>
-
-    <!-- ФОРМА ЛОГИНА (скрывается после входа) -->
-    <div id="auth-form">
-      <div class="field-label">Логин</div>
-      <input id="login-input" class="input" />
-
-      <div class="field-label" style="margin-top:6px;">Пароль</div>
-      <input id="password-input" type="password" class="input" />
-
-      <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
-        <button class="btn btn-primary" onclick="uiLogin()">Войти</button>
-        <button class="btn" onclick="uiRegister()">Регистрация</button>
+    <!-- Layers modal -->
+    <div
+      id="layers-modal-overlay"
+      class="modal-overlay"
+      style="display: none"
+      onclick="closeLayersModalOnOverlay(event)"
+    >
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="layers-modal-title">
+        <div class="modal-header">
+          <div id="layers-modal-title" class="modal-title">Слой</div>
+          <button class="btn btn-ghost" onclick="closeLayersModal()">Закрыть</button>
+        </div>
+        <div class="modal-body">
+          <div id="layers-modal-content"></div>
+        </div>
       </div>
     </div>
 
-    <!-- КНОПКА ВЫХОДА (видна только когда вошли) -->
-    <div style="margin-top:6px;">
-      <button id="logout-btn" class="btn" onclick="uiLogout()" style="display:none;">Выйти</button>
-    </div>
-
-    <!-- ТУТ МЫ БУДЕМ ПИСАТЬ СТАТУС Telegram -->
-    <div id="tg-status" class="hint" style="margin-top:8px;"></div>
-
-    <!-- ПОДСКАЗКА про бота (скрываем, когда tg уже привязан) -->
-    <div id="tg-hint" class="hint" style="margin-top:8px; display:none;">
-      Хотите отправлять точки через Telegram?
-    </div>
-
-    <!-- КНОПКА генерации кода (скрываем, когда tg уже привязан) -->
-    <button id="tg-link-btn" class="btn" style="margin-top:6px; display:none;" onclick="startTelegramLink()">
-      Сгенерировать код привязки Telegram
-    </button>
-
-    <div id="tg-link-code" class="hint" style="margin-top:6px; display:none;"></div>
-  </div>
-
-  <div id="authed-only" style="display:none;">
-  <!-- card "Слои" -->
-    <div class="card">
-      <div class="sidebar-section-title">Слои</div>
-      <div class="layers-list">
-        <label>
-          <input type="checkbox" id="layer-public" checked onchange="onLayerChange()">
-          <span>Все точки</span>
-        </label>
-        <label>
-          <input type="checkbox" id="layer-my" checked onchange="onLayerChange()">
-          <span>Мои точки</span>
-        </label>
-      </div>
-      <div class="hint">
+    <!-- Модальное окно подтверждения удаления аккаунта -->
+    <div
+      id="delete-account-overlay"
+      class="modal-overlay"
+      style="display: none"
+      onclick="closeDeleteAccountModalOnOverlay(event)"
+    >
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div class="modal-title">Удаление аккаунта</div>
+          <button class="icon-btn" onclick="closeDeleteAccountModal()" title="Закрыть">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="hint" style="margin-bottom: 12px">
+            Вы уверены, что хотите удалить аккаунт? Все ваши точки, фотографии и данные будут
+            удалены безвозвратно.
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: flex-end">
+            <button class="btn" onclick="closeDeleteAccountModal()">Отмена</button>
+            <button class="btn btn-danger" onclick="confirmDeleteAccount()">Удалить</button>
+          </div>
+        </div>
       </div>
     </div>
-
-    <div class="card">
-      <div class="sidebar-section-title">Добавление точек</div>
-      <div class="hint" style="margin-bottom:8px;">
-        Нажмите <b>правой кнопкой мыши</b> по карте - появится временный желтый пин.
-      </div>
-
-      <div class="field-label">Название</div>
-      <input id="web-title" class="input" placeholder="Или его отсутствие" />
-
-      <div class="field-label" style="margin-top:6px;">Описание</div>
-      <textarea id="web-note" class="input" placeholder="Если есть желание - расскажите, что тут интересного" rows="3" style="resize:vertical;"></textarea>
-
-      <div class="field-label" style="margin-top:6px;">Фотографии (до 12 шт.)</div>
-      <input id="web-photos" type="file" accept="image/*" multiple class="input" />
-
-      <div class="field-label" style="margin-top:6px;">Координаты</div>
-      <div id="web-coords" class="hint">
-        ПКМ по карте, чтобы выбрать точку.
-      </div>
-
-      <button class="btn btn-primary" style="margin-top:8px;" onclick="addWebPoint()">
-        Добавить точку
-      </button>
-
-      <div id="web-add-status" class="hint" style="margin-top:6px;">
-        Выберите место на карте правой кнопкой мыши.
-      </div>
-
-      <div class="hint" style="margin-top:8px;">
-        Также можно добавить точку, отправив геолокацию боту <b>@memorymap_bot</b>.
-      </div>
-    </div>
-    </div>
-  </aside>
-
-  <!-- MAP -->
-  <main class="map-wrapper">
-    <div id="map"></div>
-
-    <div class="map-topbar">
-      <div class="map-topbar-left">
-        <div class="status-dot"></div>
-        <div class="status-text" id="status-text">Подключено к API</div>
-      </div>
-      <div class="map-topbar-right">
-        <span class="map-counter" id="points-counter">Точек: 0</span>
-        <button class="btn" onclick="refresh()">Обновить</button>
-      </div>
-    </div>
-  </main>
-</div>
-
-<script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
-<script src="/app.js" defer></script>
-<div id="mm-edit-modal" class="mm-modal" style="display:none;">
-  <div class="mm-modal-card">
-    <div class="mm-modal-title" id="mm-modal-title"></div>
-    <input id="mm-modal-input" class="input" style="display:none;" />
-    <textarea id="mm-modal-textarea" class="input" rows="6" style="display:none; resize:vertical;"></textarea>
-
-    <div class="mm-modal-actions">
-      <button class="btn" onclick="mmModalCancel()">Отмена</button>
-      <button class="btn btn-primary" onclick="mmModalSave()">Сохранить</button>
-    </div>
-  </div>
-</div>
-<input id="mm-photo-input" type="file" accept="image/*" multiple style="display:none;" />
-</body>
+  </body>
 </html>

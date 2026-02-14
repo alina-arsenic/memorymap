@@ -1,6 +1,8 @@
-import boto3, os
-from botocore.exceptions import ClientError
+import os
 from urllib.parse import urlparse, urlunparse
+
+import boto3
+from botocore.exceptions import ClientError
 
 BUCKET = os.getenv("S3_BUCKET", "memorymap-media")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")

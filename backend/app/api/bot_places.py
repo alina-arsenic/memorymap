@@ -1,10 +1,9 @@
+from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
+from app.core.deps import get_db
+from app.models.models import Media, Place
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
-from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
-from app.core.deps import get_db
-from app.models.models import Place, Media
 
 router = APIRouter(prefix="/bot", tags=["bot"])
 
