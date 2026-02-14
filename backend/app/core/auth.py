@@ -2,7 +2,7 @@ from typing import Optional
 
 from app.core.deps import get_db
 from app.core.jwt import decode_access_token
-from app.models.models import User
+from app.models.models import Group, User
 from fastapi import Depends, Header
 from sqlalchemy import text
 from sqlalchemy.orm import Session
