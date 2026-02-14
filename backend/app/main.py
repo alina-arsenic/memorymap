@@ -1,11 +1,19 @@
+from app.api import (
+    admin,
+    auth,
+    bot_places,
+    friends,
+    groups,
+    layers,
+    me,
+    media,
+    moderation,
+    places,
+    users,
+)
+from app.api import bot as bot_api
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-
-from app.api import media, me, groups, places, auth, admin, moderation, layers
-from app.api import users, friends
-from app.api import bot as bot_api
-from app.api import bot_places
-
 
 app = FastAPI(title="MemoryMap API")
 app.include_router(auth.router, prefix="/v1")

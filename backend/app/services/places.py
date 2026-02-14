@@ -1,14 +1,14 @@
 """Сервис работы с точками (создание, выборка, удаление, модерация)."""
 
-from typing import Optional, List, Dict
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, text
+from typing import Dict, List, Optional
 
-from app.models.models import User, Place, Media, Group
-from app.services.users import UserService
-from app.services.groups import GroupService
-from app.storage import presign_get, move_to_place_folder, delete_place_folder
 from app.core.config import MEDIA_LIMIT_PER_PLACE
+from app.models.models import Group, Media, Place, User
+from app.services.groups import GroupService
+from app.services.users import UserService
+from app.storage import delete_place_folder, move_to_place_folder, presign_get
+from sqlalchemy import or_, text
+from sqlalchemy.orm import Session
 
 
 class PlaceService:

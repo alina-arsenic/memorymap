@@ -1,11 +1,10 @@
 import uuid
-from typing import Optional, List, Dict
-
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from typing import Dict, List, Optional
 
 from app.models.models import User
 from app.services.friends import FriendsService
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 
 class UserService:

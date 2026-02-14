@@ -3,10 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from sqlalchemy.orm import Session
+from app.models.models import FriendRequest, Friendship, User
 from sqlalchemy import and_, or_
-
-from app.models.models import User, Friendship, FriendRequest
+from sqlalchemy.orm import Session
 
 
 def _pair(a: int, b: int) -> tuple[int, int]:

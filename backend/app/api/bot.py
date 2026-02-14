@@ -1,14 +1,14 @@
+import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Header
+
+from app.core.auth import _ensure_personal_group  # чтобы сразу завести личную группу
+from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
+from app.core.deps import get_db
+from app.models.models import Media, TelegramLinkCode, User
+from app.storage import presign_put
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import uuid
-
-from app.storage import presign_put
-from app.core.deps import get_db
-from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
-from app.models.models import User, TelegramLinkCode, Media
-from app.core.auth import _ensure_personal_group  # чтобы сразу завести личную группу
 
 router = APIRouter()
 

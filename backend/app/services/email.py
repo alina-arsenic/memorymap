@@ -1,11 +1,11 @@
 """Сервис отправки email через SMTP (подтверждение регистрации)."""
 
-import smtplib
 import logging
-from email.mime.text import MIMEText
+import smtplib
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-from app.core.config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
+from app.core.config import SMTP_FROM, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
 
 log = logging.getLogger(__name__)
 

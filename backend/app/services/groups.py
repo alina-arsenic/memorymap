@@ -1,9 +1,10 @@
-from typing import Optional, List, Dict, Literal
-from sqlalchemy.orm import Session
+from typing import Dict, List, Literal, Optional
+
+from app.models.models import Group, User
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from app.models.models import User, Group
 
 class GroupService:
     @staticmethod

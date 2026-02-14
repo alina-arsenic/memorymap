@@ -2,8 +2,8 @@
 
 import json
 import logging
-from urllib.request import urlopen, Request
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from app.core.config import TELEGRAM_BOT_TOKEN
 

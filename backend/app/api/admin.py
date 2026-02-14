@@ -1,12 +1,11 @@
 """API: управление пользователями (только для admin)."""
 
+from app.core.auth import get_current_user
+from app.core.deps import get_db
+from app.models.models import Place, User
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
-from app.core.deps import get_db
-from app.core.auth import get_current_user
-from app.models.models import User, Place
 
 router = APIRouter()
 

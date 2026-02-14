@@ -2,8 +2,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 import jwt
+from app.core.config import JWT_ALG, JWT_EXPIRES_MINUTES, JWT_SECRET
 
-from app.core.config import JWT_SECRET, JWT_ALG, JWT_EXPIRES_MINUTES
 
 def create_access_token(user_id: int) -> str:
     now = datetime.now(timezone.utc)

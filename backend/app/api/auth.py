@@ -1,19 +1,18 @@
 """API: регистрация, подтверждение email, логин."""
 
-import re
 import random
+import re
 from datetime import datetime, timedelta, timezone
 
+from app.core.config import EMAIL_CODE_TTL_MINUTES
+from app.core.deps import get_db
+from app.core.jwt import create_access_token
+from app.core.security import hash_password, verify_password
+from app.models.models import EmailVerificationCode, User
+from app.services.email import send_verification_email
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
-from app.core.deps import get_db
-from app.core.config import EMAIL_CODE_TTL_MINUTES
-from app.core.security import hash_password, verify_password
-from app.core.jwt import create_access_token
-from app.models.models import User, EmailVerificationCode
-from app.services.email import send_verification_email
 
 router = APIRouter()
 

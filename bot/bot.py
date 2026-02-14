@@ -1,13 +1,16 @@
-import os, asyncio, logging, requests, socket
-from aiohttp import TCPConnector
+import asyncio
+import logging
+import os
 from urllib.parse import urlparse, urlunparse
+
+import requests
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.filters import CommandStart, CommandObject
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_BASE = os.getenv("APP_BASE_URL", "http://api:8000")

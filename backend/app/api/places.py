@@ -1,17 +1,14 @@
-from typing import Optional, List, Dict
-from fastapi import APIRouter, Depends, HTTPException, Body, Header
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from typing import List, Optional
 
-from app.core.deps import get_db
 from app.core.auth import get_current_user
-from app.core.config import MEDIA_LIMIT_PER_PLACE
-from app.models.models import User, Place, Media
+from app.core.config import BOT_API_SECRET
+from app.core.deps import get_db
+from app.models.models import Media, Place, User
 from app.services.places import PlaceService
 from app.storage import move_to_place_folder
-from app.core.config import BOT_API_SECRET
-from app.services.users import UserService
-
+from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 router = APIRouter()
 
@@ -65,8 +62,8 @@ def create_place(
         if str(e) == "media_limit":
             raise HTTPException(status_code=400, detail="media_limit")
         raise HTTPException(status_code=400, detail=str(e))
-    
-    
+
+
 
 @router.get("/places")
 def list_places(
