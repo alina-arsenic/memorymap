@@ -45,6 +45,8 @@ def create_group(
 ):
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if not g.name or not g.name.strip():
+        raise HTTPException(status_code=400, detail="empty_name")
 
     gid = GroupService.create_group(
         db, owner=current_user, name=g.name, visibility=g.visibility, add_friends=g.add_friends
@@ -104,6 +106,8 @@ def add_member(
         return {"status": "ok"}
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.delete("/groups/{group_id}/members/{user_id}")

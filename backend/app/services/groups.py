@@ -206,6 +206,9 @@ class GroupService:
     def add_member(db: Session, owner: User, group_id: int, user_id: int, role: Literal["editor", "viewer"]) -> None:
         GroupService.require_is_owner(db, owner, group_id)
         # cannot add self as non-owner
+        # проверяем что пользователь существует
+        if not db.query(User).filter(User.id == user_id).one_or_none():
+            raise ValueError("user_not_found")
         db.execute(
             text(
                 "INSERT INTO membership (user_id, group_id, role) VALUES (:uid, :gid, :role) "

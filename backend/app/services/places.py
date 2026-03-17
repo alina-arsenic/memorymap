@@ -92,7 +92,10 @@ class PlaceService:
         - гость — только approved.
         Для приватных групп: все точки (модерация не применяется).
         """
-        left, bottom, right, top = [float(x) for x in bbox.split(",")]
+        try:
+            left, bottom, right, top = [float(x) for x in bbox.split(",")]
+        except (ValueError, TypeError):
+            raise ValueError("invalid_bbox")
 
         group = db.query(Group).filter(Group.id == group_id).one_or_none()
         if not group:
@@ -176,7 +179,10 @@ class PlaceService:
 
         group_ids (optional) further restricts to a subset of accessible groups.
         """
-        left, bottom, right, top = [float(x) for x in bbox.split(",")]
+        try:
+            left, bottom, right, top = [float(x) for x in bbox.split(",")]
+        except (ValueError, TypeError):
+            raise ValueError("invalid_bbox")
 
         # Determine accessible group ids
         if current_user_id is None:

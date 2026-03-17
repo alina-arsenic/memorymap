@@ -37,7 +37,7 @@ def list_moderation_places(
         db.query(Place, User)
         .outerjoin(User, Place.user_id == User.id)
         .filter(Place.moderation_status == status)
-        .order_by(Place.id.desc())
+        .order_by(Place.id.asc())
         .limit(200)
     )
 

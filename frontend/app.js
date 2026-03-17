@@ -1690,6 +1690,14 @@ async function refresh() {
         ? `<div style="margin-top:4px;padding:2px 8px;background:#f3f4f6;color:#6b7280;border-radius:9999px;font-size:11px;display:inline-block;">На модерации</div>`
         : "";
 
+      // кнопки модерации в попапе (только для pending-точек, видны admin/moderator)
+      const moderationBtns = isPending && currentUser && (currentUser.role === "admin" || currentUser.role === "moderator")
+        ? `<div style="margin-top:6px;display:flex;gap:6px;">
+            <button onclick="moderatePlace(${p.id},'approved')" style="font-size:12px;padding:4px 10px;border-radius:9999px;border:1px solid #16a34a;background:#dcfce7;color:#15803d;cursor:pointer;">Одобрить</button>
+            <button onclick="moderatePlace(${p.id},'rejected')" style="font-size:12px;padding:4px 10px;border-radius:9999px;border:1px solid #dc2626;background:#fee2e2;color:#b91c1c;cursor:pointer;">Отклонить</button>
+          </div>`
+        : "";
+
       let deleteButtonHtml = "";
       if (p.isMine) {
       deleteButtonHtml = `<br><button class="mm-delete-btn" data-id="${p.id}" style="margin-top:4px;font-size:12px;padding:4px 8px;border-radius:9999px;border:1px solid #dc2626;background:#fee2e2;color:#b91c1c;cursor:pointer;">
@@ -1760,6 +1768,7 @@ async function refresh() {
           ${noteBlock}
           <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
           ${pendingBadge}
+          ${moderationBtns}
           ${addBtnHtml}
           ${photosHtml}
           ${deleteButtonHtml}
