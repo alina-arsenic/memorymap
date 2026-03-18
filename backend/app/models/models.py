@@ -103,3 +103,21 @@ class FriendRequest(Base):
     status = Column(Text, nullable=False, default="pending")  # pending|accepted|declined|canceled
     created_at = Column(DateTime(timezone=True))
     responded_at = Column(DateTime(timezone=True))
+
+
+class GroupInvite(Base):
+    """Приглашение в группу (слой)."""
+    __tablename__ = "group_invites"
+
+    id = Column(Integer, primary_key=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+    from_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    to_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False, default="viewer")  # editor | viewer
+    status = Column(Text, nullable=False, default="pending")  # pending|accepted|declined|canceled
+    created_at = Column(DateTime(timezone=True))
+    responded_at = Column(DateTime(timezone=True))
+
+    group = relationship("Group")
+    from_user = relationship("User", foreign_keys=[from_user_id])
+    to_user = relationship("User", foreign_keys=[to_user_id])

@@ -3,6 +3,7 @@ from app.api import (
     auth,
     bot_places,
     friends,
+    group_invites,
     groups,
     layers,
     me,
@@ -26,6 +27,7 @@ def healthz():
 
 app.include_router(media.router, prefix="/v1")
 app.include_router(me.router, prefix="/v1")
+app.include_router(group_invites.router, prefix="/v1")
 app.include_router(groups.router, prefix="/v1")
 app.include_router(layers.router, prefix="/v1")
 app.include_router(places.router, prefix="/v1")

@@ -11,12 +11,14 @@ from app.models.models import (
     FriendRequest,
     Friendship,
     Group,
+    GroupInvite,
     Media,
     Place,
     TelegramLinkCode,
     User,
 )
 from app.services.friends import FriendsService
+from app.services.group_invites import GroupInviteService
 from app.services.groups import GroupService
 from app.services.users import UserService
 from app.storage import delete_place_folder
@@ -40,6 +42,7 @@ def me(
     groups = GroupService.list_groups(db, current_user)
     friends = UserService.list_friends(db, current_user)
     inbox_count = FriendsService.inbox_count(db, current_user)
+    group_invites_count = GroupInviteService.inbox_count(db, current_user.id)
 
     return {
         "id": current_user.id,
@@ -50,6 +53,7 @@ def me(
         "groups": groups,
         "friends": friends,
         "friend_requests_inbox_count": inbox_count,
+        "group_invites_inbox_count": group_invites_count,
     }
 
 # Legacy endpoint: keep path for compatibility, but now it creates a friend REQUEST by tg_id.
@@ -116,7 +120,10 @@ def delete_account(
     # 3. Удаляем точки пользователя
     db.query(Place).filter(Place.user_id == uid).delete(synchronize_session=False)
 
-    # 4. Удаляем дружбы и запросы дружбы
+    # 4. Удаляем дружбы, запросы дружбы и инвайты в группы
+    db.query(GroupInvite).filter(
+        (GroupInvite.from_user_id == uid) | (GroupInvite.to_user_id == uid)
+    ).delete(synchronize_session=False)
     db.query(Friendship).filter(
         (Friendship.user1_id == uid) | (Friendship.user2_id == uid)
     ).delete(synchronize_session=False)

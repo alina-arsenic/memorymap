@@ -129,9 +129,11 @@ class GroupService:
             ),
             {"uid": owner.id, "gid": g.id},
         )
+        db.commit()
 
         if add_friends:
-            # Use mutual friendships table (friendships)
+            # Отправляем инвайты всем друзьям (вместо прямого добавления)
+            from app.services.group_invites import GroupInviteService
             rows = db.execute(
                 text(
                     """
@@ -143,16 +145,11 @@ class GroupService:
                 {"uid": owner.id},
             ).fetchall()
             for (fid,) in rows:
-                db.execute(
-                    text(
-                        "INSERT INTO membership (user_id, group_id, role) "
-                        "VALUES (:uid, :gid, 'editor') "
-                        "ON CONFLICT (user_id, group_id) DO NOTHING"
-                    ),
-                    {"uid": fid, "gid": g.id},
-                )
+                try:
+                    GroupInviteService.send_invite(db, owner, g.id, fid, role="editor")
+                except (ValueError, PermissionError):
+                    pass  # пропускаем если нельзя пригласить
 
-        db.commit()
         return g.id
 
     @staticmethod

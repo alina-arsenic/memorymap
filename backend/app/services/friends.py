@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from app.models.models import FriendRequest, Friendship, User
+from app.models.models import FriendRequest, Friendship, GroupInvite, User
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
@@ -138,6 +138,19 @@ class FriendsService:
                 r.status = "canceled"
                 r.responded_at = now
                 db.add(r)
+
+        # Отменяем pending-инвайты в группы между этой парой
+        group_invites = db.query(GroupInvite).filter(
+            GroupInvite.status == "pending",
+            or_(
+                and_(GroupInvite.from_user_id == current_user.id, GroupInvite.to_user_id == other_user_id),
+                and_(GroupInvite.from_user_id == other_user_id, GroupInvite.to_user_id == current_user.id),
+            )
+        ).all()
+        for gi in group_invites:
+            gi.status = "canceled"
+            gi.responded_at = now
+            db.add(gi)
 
         db.commit()
         return {"status": "removed"}

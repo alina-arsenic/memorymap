@@ -532,9 +532,11 @@ function updateNotifBadge() {
   const badge = document.getElementById("notif-badge");
   if (!badge) return;
 
-  const n = (currentUser && typeof currentUser.friend_requests_inbox_count === "number")
-    ? currentUser.friend_requests_inbox_count
-    : 0;
+  const fr = (currentUser && typeof currentUser.friend_requests_inbox_count === "number")
+    ? currentUser.friend_requests_inbox_count : 0;
+  const gi = (currentUser && typeof currentUser.group_invites_inbox_count === "number")
+    ? currentUser.group_invites_inbox_count : 0;
+  const n = fr + gi;
 
   badge.innerText = String(n);
   badge.style.display = n > 0 ? "" : "none";
@@ -766,9 +768,9 @@ async function submitCreateLayer() {
     }
     const gid = data.id;
 
-    // add selected friends as editors
+    // отправить инвайты выбранным друзьям
     for (const uid of checked) {
-      await apiFetch(`/v1/groups/${gid}/members`, {
+      await apiFetch(`/v1/groups/${gid}/invites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: uid, role: "editor" }),
@@ -807,7 +809,21 @@ async function openEditLayerModal(groupId) {
     const members = Array.isArray(data.members) ? data.members : [];
     const friends = (currentUser && Array.isArray(currentUser.friends)) ? currentUser.friends : [];
     const memberIds = new Set(members.map(m => m.id));
-    const addable = friends.filter(f => !memberIds.has(f.id));
+    // pendingInviteUserIds заполняется ниже, но для фильтрации addable нужно загрузить инвайты заранее
+    let pendingInviteUserIds = new Set();
+    let pendingInvitesForGroup = [];
+    if (isOwner && !isPersonal) {
+      try {
+        const invResp = await apiFetch(`/v1/groups/invites?outbox=1&status=pending`);
+        const invData = await invResp.json().catch(() => ({}));
+        if (invResp.ok) {
+          pendingInvitesForGroup = (Array.isArray(invData.items) ? invData.items : [])
+            .filter(inv => inv.group && inv.group.id === groupId);
+          pendingInviteUserIds = new Set(pendingInvitesForGroup.map(inv => inv.to_user?.id).filter(Boolean));
+        }
+      } catch (_) {}
+    }
+    const addable = friends.filter(f => !memberIds.has(f.id) && !pendingInviteUserIds.has(f.id));
 
     const membersHtml = members.map(m => {
       const label = escapeHtml(m.login || m.username || `user#${m.id}`);
@@ -847,9 +863,35 @@ async function openEditLayerModal(groupId) {
       return `<option value="${f.id}">${label}</option>`;
     }).join("");
 
+    // Pending-инвайты для этой группы (данные загружены выше)
+    let pendingInvitesHtml = "";
+    if (isOwner && !isPersonal && pendingInvitesForGroup.length > 0) {
+      pendingInvitesHtml = `
+        <div class="field-label" style="margin-top:10px;">Ожидающие приглашения</div>
+        <div class="list" style="margin-top:6px;">
+          ${pendingInvitesForGroup.map(inv => {
+            const to = inv.to_user || {};
+            const toName = escapeHtml(to.login || to.username || `user#${to.id || "?"}`);
+            const roleLabel = inv.role === "editor" ? "редактор" : "наблюдатель";
+            return `
+              <div class="list-item" style="align-items:center;">
+                <div class="meta">
+                  <div class="title">${toName}</div>
+                  <div class="sub">${escapeHtml(roleLabel)} • ожидает</div>
+                </div>
+                <div class="actions">
+                  <button class="btn btn-ghost btn-icon" title="Отменить" onclick="cancelGroupInvite(${inv.id}, ${groupId})">✕</button>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
+
     const addSection = (isOwner && !isPersonal) ? `
       <div class="divider" style="margin:12px 0;"></div>
-      <div class="field-label">Добавить друга</div>
+      <div class="field-label">Пригласить друга</div>
       <div style="display:flex;gap:8px;align-items:center;">
         <select id="layer-add-user" class="input" style="flex:1;">
           ${addFriendOptions || ""}
@@ -858,9 +900,10 @@ async function openEditLayerModal(groupId) {
           <option value="editor">editor</option>
           <option value="viewer">viewer</option>
         </select>
-        <button class="btn btn-primary" onclick="addLayerMember(${groupId})" ${addable.length ? "" : "disabled"}>Добавить</button>
+        <button class="btn btn-primary" onclick="sendLayerInvite(${groupId})" ${addable.length ? "" : "disabled"}>Пригласить</button>
       </div>
-      <div class="hint" style="margin-top:6px;">Добавлять можно только друзей.</div>
+      <div class="hint" style="margin-top:6px;">Приглашать можно только друзей.</div>
+      ${pendingInvitesHtml}
     ` : `
       <div class="hint" style="margin-top:10px;">Управлять участниками может только владелец слоя.</div>
     `;
@@ -922,6 +965,7 @@ async function renameLayer(groupId) {
 }
 
 async function addLayerMember(groupId) {
+  // legacy: прямое добавление (используется ботом, оставляем для обратной совместимости)
   const statusEl = document.getElementById("layer-edit-status");
   const userSel = document.getElementById("layer-add-user");
   const roleSel = document.getElementById("layer-add-role");
@@ -942,6 +986,53 @@ async function addLayerMember(groupId) {
     await refreshUserSnapshot();
     renderGroupLayersUI();
     populateAddGroupSelect();
+    openEditLayerModal(groupId);
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+async function sendLayerInvite(groupId) {
+  const statusEl = document.getElementById("layer-edit-status");
+  const userSel = document.getElementById("layer-add-user");
+  const roleSel = document.getElementById("layer-add-role");
+  const uid = userSel ? Number(userSel.value) : null;
+  const role = roleSel ? roleSel.value : "editor";
+  if (!uid) return;
+  try {
+    const resp = await apiFetch(`/v1/groups/${groupId}/invites`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: uid, role }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
+    if (data.status === "already_pending") {
+      if (statusEl) statusEl.innerText = "Приглашение уже отправлено.";
+      return;
+    }
+    if (statusEl) statusEl.innerText = "Приглашение отправлено.";
+    // Обновляем модалку чтобы показать pending-инвайт
+    openEditLayerModal(groupId);
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+async function cancelGroupInvite(inviteId, groupId) {
+  const statusEl = document.getElementById("layer-edit-status");
+  try {
+    const resp = await apiFetch(`/v1/groups/invites/${inviteId}`, { method: "DELETE" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      return;
+    }
     openEditLayerModal(groupId);
   } catch (e) {
     console.error(e);
@@ -1183,11 +1274,13 @@ function closeFriendRequestsModal(silent = false) {
 
   overlay.style.display = "none";
 
-  // опционально: очистка списков
+  // очистка списков
   const inbox = document.getElementById("inbox-requests");
   const outbox = document.getElementById("outbox-requests");
+  const giBox = document.getElementById("group-invites-inbox");
   if (inbox) inbox.innerHTML = "";
   if (outbox) outbox.innerHTML = "";
+  if (giBox) giBox.innerHTML = "";
 
   if (!silent) {
     // ничего
@@ -1197,19 +1290,24 @@ function closeFriendRequestsModal(silent = false) {
 async function loadFriendRequestsLists() {
   const inbox = document.getElementById("inbox-requests");
   const outbox = document.getElementById("outbox-requests");
+  const giBox = document.getElementById("group-invites-inbox");
   if (!inbox || !outbox) return;
 
   inbox.innerHTML = `<div class="hint">Загрузка…</div>`;
   outbox.innerHTML = `<div class="hint">Загрузка…</div>`;
+  if (giBox) giBox.innerHTML = `<div class="hint">Загрузка…</div>`;
 
   try {
-    const [inResp, outResp] = await Promise.all([
+    const fetches = [
       apiFetch("/v1/friends/requests?inbox=1&status=pending"),
       apiFetch("/v1/friends/requests?outbox=1&status=pending"),
-    ]);
+      apiFetch("/v1/groups/invites?inbox=1&status=pending"),
+    ];
+    const [inResp, outResp, giResp] = await Promise.all(fetches);
 
     const inData = await inResp.json().catch(() => ({}));
     const outData = await outResp.json().catch(() => ({}));
+    const giData = await giResp.json().catch(() => ({}));
 
     if (!inResp.ok) {
       inbox.innerHTML = `<div class="hint">Ошибка: ${escapeHtml(inData.detail || String(inResp.status))}</div>`;
@@ -1280,6 +1378,39 @@ async function loadFriendRequestsLists() {
       }
     }
 
+    // Приглашения в слои (входящие)
+    if (giBox) {
+      if (!giResp.ok) {
+        giBox.innerHTML = `<div class="hint">Ошибка: ${escapeHtml(giData.detail || String(giResp.status))}</div>`;
+      } else {
+        const items = Array.isArray(giData.items) ? giData.items : [];
+        if (items.length === 0) {
+          giBox.innerHTML = `<div class="hint">Нет приглашений в слои.</div>`;
+        } else {
+          giBox.innerHTML = items.map(r => {
+            const from = r.from_user || {};
+            const group = r.group || {};
+            const fromName = escapeHtml(from.login || from.username || `user#${from.id || "?"}`);
+            const groupName = escapeHtml(group.name || `слой #${group.id || "?"}`);
+            const roleLabel = r.role === "editor" ? "редактор" : "наблюдатель";
+
+            return `
+              <div class="list-item">
+                <div class="meta">
+                  <div class="title">${groupName}</div>
+                  <div class="sub">от ${fromName} • ${escapeHtml(roleLabel)}</div>
+                </div>
+                <div class="actions">
+                  <button class="btn btn-primary" onclick="acceptGroupInvite(${r.id})">Принять</button>
+                  <button class="btn" onclick="declineGroupInvite(${r.id})">Отклонить</button>
+                </div>
+              </div>
+            `;
+          }).join("");
+        }
+      }
+    }
+
     // обновим счетчик (на случай если приняли с другого устройства)
     await refreshUserSnapshot();
     updateNotifBadge();
@@ -1288,6 +1419,7 @@ async function loadFriendRequestsLists() {
     console.error(e);
     inbox.innerHTML = `<div class="hint">Ошибка сети.</div>`;
     outbox.innerHTML = `<div class="hint">Ошибка сети.</div>`;
+    if (giBox) giBox.innerHTML = `<div class="hint">Ошибка сети.</div>`;
   }
 }
 
@@ -1311,6 +1443,41 @@ async function acceptFriendRequest(requestId) {
 async function declineFriendRequest(requestId) {
   try {
     const resp = await apiFetch(`/v1/friends/requests/${requestId}/decline`, { method: "POST" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось отклонить: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    await loadFriendRequestsLists();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
+
+async function acceptGroupInvite(inviteId) {
+  try {
+    const resp = await apiFetch(`/v1/groups/invites/${inviteId}/accept`, { method: "POST" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось принять: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    renderGroupLayersUI();
+    populateAddGroupSelect();
+    await loadFriendRequestsLists();
+    refresh();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
+
+async function declineGroupInvite(inviteId) {
+  try {
+    const resp = await apiFetch(`/v1/groups/invites/${inviteId}/decline`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       alert("Не удалось отклонить: " + (data.detail || resp.status));
