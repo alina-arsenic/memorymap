@@ -121,3 +121,22 @@ class GroupInvite(Base):
     group = relationship("Group")
     from_user = relationship("User", foreign_keys=[from_user_id])
     to_user = relationship("User", foreign_keys=[to_user_id])
+
+
+class Report(Base):
+    """Жалоба на точку (постмодерация)."""
+    __tablename__ = "reports"
+
+    id = Column(Integer, primary_key=True)
+    place_id = Column(Integer, ForeignKey("places.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    category = Column(Text, nullable=False)
+    comment = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, default="pending")  # pending | dismissed | upheld
+    created_at = Column(DateTime(timezone=True))
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    place = relationship("Place")
+    reporter = relationship("User", foreign_keys=[user_id])
+    resolver = relationship("User", foreign_keys=[resolved_by])

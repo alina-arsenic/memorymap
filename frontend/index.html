@@ -364,5 +364,53 @@
         </div>
       </div>
     </div>
+    <!-- MODAL: Жалоба на точку -->
+    <div
+      id="report-overlay"
+      class="modal-overlay"
+      style="display: none"
+      onclick="closeReportModalOnOverlay(event)"
+    >
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div class="modal-title">Пожаловаться</div>
+          <button class="icon-btn" onclick="closeReportModal()" title="Закрыть">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field-label" style="margin-bottom: 8px">Причина жалобы</div>
+          <label style="display:block;margin-bottom:6px;font-size:13px;cursor:pointer;">
+            <input type="radio" name="report-category" value="spam" checked onchange="onReportCategoryChange()" /> Спам/реклама
+          </label>
+          <label style="display:block;margin-bottom:6px;font-size:13px;cursor:pointer;">
+            <input type="radio" name="report-category" value="offensive" onchange="onReportCategoryChange()" /> Оскорбительный контент
+          </label>
+          <label style="display:block;margin-bottom:6px;font-size:13px;cursor:pointer;">
+            <input type="radio" name="report-category" value="wrong_location" onchange="onReportCategoryChange()" /> Неверная локация
+          </label>
+          <label style="display:block;margin-bottom:6px;font-size:13px;cursor:pointer;">
+            <input type="radio" name="report-category" value="privacy" onchange="onReportCategoryChange()" /> Нарушение приватности
+          </label>
+          <label style="display:block;margin-bottom:6px;font-size:13px;cursor:pointer;">
+            <input type="radio" name="report-category" value="other" onchange="onReportCategoryChange()" /> Другое
+          </label>
+
+          <div id="report-comment-label" class="field-label" style="margin-top: 10px">Комментарий (необязательно)</div>
+          <textarea
+            id="report-comment"
+            class="input"
+            rows="3"
+            style="resize: vertical"
+            placeholder="Подробности..."
+          ></textarea>
+
+          <div id="report-status" class="hint" style="margin-top: 6px"></div>
+
+          <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px">
+            <button class="btn" onclick="closeReportModal()">Отмена</button>
+            <button class="btn btn-danger" onclick="submitReport()">Отправить</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

@@ -6,6 +6,7 @@ let currentUser = null;  // объект из /v1/me
 let currentMarkers = []; // ссылки на Marker, чтобы их удалять
 let markersByPlaceId = {}; // {place_id: Marker} — для открытия попапа из панели модерации
 let pendingPopupPlaceId = null; // placeId для открытия попапа после refresh
+let pendingPopupGroupId = null; // groupId для включения в feed-запрос
 
 let tempMarker = null; // временный желтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
@@ -1778,7 +1779,7 @@ async function refresh() {
 
   const extraSelected = Array.from(selectedGroupLayerIds);
 
-  if (!showPublic && !showMy && extraSelected.length === 0) {
+  if (!showPublic && !showMy && extraSelected.length === 0 && !pendingPopupGroupId) {
     clearMarkers();
     updateCounter(0);
     return;
@@ -1797,6 +1798,10 @@ async function refresh() {
     const gids = [];
     if (showPublic || showMy) gids.push(1);
     for (const gid of extraSelected) gids.push(gid);
+    // Гарантируем включение группы точки из панели модерации
+    if (pendingPopupGroupId && !gids.includes(pendingPopupGroupId)) {
+      gids.push(pendingPopupGroupId);
+    }
 
     const q = `/v1/places/feed?bbox=${encodeURIComponent(bbox)}&scope=all&group_ids=${encodeURIComponent(gids.join(","))}`;
     const r = await apiFetch(q);
@@ -1819,6 +1824,12 @@ async function refresh() {
   for (const p of allItems) {
       const ownerUserId = p.user_id != null ? String(p.user_id) : null;
       const isMine = myUserId && ownerUserId && ownerUserId === myUserId;
+
+      // Точка из панели модерации — всегда показываем
+      if (pendingPopupPlaceId !== null && p.id === pendingPopupPlaceId) {
+        filtered.push({ ...p, isMine });
+        continue;
+      }
 
       // For public group (group_id=1), apply public/my filters.
       if (p.group_id === 1 || p.group_id === "1") {
@@ -1852,9 +1863,25 @@ async function refresh() {
           ? p.title
           : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
 
-      // плашка «На модерации» для pending-точек
-      const pendingBadge = isPending
-        ? `<div style="margin-top:4px;padding:2px 8px;background:#f3f4f6;color:#6b7280;border-radius:9999px;font-size:11px;display:inline-block;">На модерации</div>`
+      // плашка «На модерации» / «Поступила жалоба» для pending-точек
+      let pendingBadge = "";
+      if (isPending) {
+        if (p.isMine && p.has_report) {
+          pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Поступила жалоба</div>`;
+        } else {
+          pendingBadge = `<div class="mm-report-badge mm-report-badge--pending">На модерации</div>`;
+        }
+      }
+
+      // Кнопка «⋯» → «Пожаловаться» на чужих approved-точках
+      const canReport = !p.isMine && !isPending && currentUser;
+      const reportMenuHtml = canReport
+        ? `<div class="mm-popup-menu">
+            <button class="mm-popup-menu-btn" onclick="var dd=this.nextElementSibling;dd.style.display=dd.style.display==='block'?'none':'block';event.stopPropagation();">⋯</button>
+            <div class="mm-popup-dropdown" style="display:none">
+              <button class="mm-popup-dropdown-item" onclick="openReportModal(${p.id})">Пожаловаться</button>
+            </div>
+          </div>`
         : "";
 
       // кнопки модерации в попапе (только для pending-точек, видны admin/moderator)
@@ -1931,7 +1958,10 @@ async function refresh() {
 
       const popupHtml = `
         <div class="mm-popup">
-          ${titleBlock}
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;">
+            <div style="flex:1;min-width:0;">${titleBlock}</div>
+            ${reportMenuHtml}
+          </div>
           ${noteBlock}
           <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
           ${pendingBadge}
@@ -1958,6 +1988,7 @@ async function refresh() {
       marker.togglePopup();
     }
     pendingPopupPlaceId = null;
+    pendingPopupGroupId = null;
   }
 
   updateCounter(filtered.length);
@@ -2213,15 +2244,25 @@ async function loadModerationQueue() {
         ? `<div style="display:flex;gap:4px;margin-top:4px;">${photos}</div>`
         : "";
 
+      // Жалобы на эту точку
+      const reports = Array.isArray(p.reports) ? p.reports : [];
+      const reportsHtml = reports.map(r => {
+        const who = r.user_login || r.username || `user#${r.user_id}`;
+        const cat = esc(r.category_label || r.category);
+        const comm = r.comment ? ": " + esc(r.comment) : "";
+        return `<div class="mm-report-line">Жалоба от @${esc(who)}: ${cat}${comm}</div>`;
+      }).join("");
+
       return `
         <div style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
           <div style="font-weight:500;">${esc(title)}</div>
           <div style="font-size:12px;color:#6b7280;">${esc(author)} · ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
           ${notePreview ? `<div style="font-size:12px;margin-top:2px;">${esc(notePreview)}</div>` : ""}
+          ${reportsHtml}
           ${photosHtml}
           <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
             <button class="btn" style="font-size:12px;padding:2px 10px;"
-              onclick="showPlaceOnMap(${p.id},${p.lon},${p.lat})">Показать на карте</button>
+              onclick="showPlaceOnMap(${p.id},${p.lon},${p.lat},${p.group_id})">Показать на карте</button>
             <button class="btn btn-primary" style="font-size:12px;padding:2px 10px;"
               onclick="moderatePlace(${p.id},'approved')">Одобрить</button>
             <button class="btn" style="font-size:12px;padding:2px 10px;border-color:#dc2626;color:#b91c1c;"
@@ -2238,7 +2279,7 @@ async function loadModerationQueue() {
 }
 
 /** Перелететь к точке на карте и открыть её попап */
-function showPlaceOnMap(placeId, lon, lat) {
+function showPlaceOnMap(placeId, lon, lat, groupId) {
   // закрываем любые открытые попапы
   currentMarkers.forEach(m => {
     const popup = m.getPopup();
@@ -2249,6 +2290,7 @@ function showPlaceOnMap(placeId, lon, lat) {
 
   // сохраняем id для открытия попапа после refresh (который вызовется при moveend)
   pendingPopupPlaceId = placeId;
+  pendingPopupGroupId = groupId || null;
   map.flyTo({ center: [lon, lat], zoom: 16 });
 }
 
@@ -2271,6 +2313,99 @@ async function moderatePlace(placeId, status) {
     alert("Ошибка сети при модерации.");
   }
 }
+
+// ===================== Жалобы (постмодерация) =====================
+
+let _reportPlaceId = null;
+
+function openReportModal(placeId) {
+  _reportPlaceId = placeId;
+  const overlay = document.getElementById("report-overlay");
+  if (!overlay) return;
+  // сброс формы
+  const radios = document.querySelectorAll('input[name="report-category"]');
+  if (radios.length) radios[0].checked = true;
+  const comment = document.getElementById("report-comment");
+  if (comment) comment.value = "";
+  const status = document.getElementById("report-status");
+  if (status) status.innerText = "";
+  onReportCategoryChange();
+  overlay.style.display = "flex";
+}
+
+/** Обновляет подпись и обязательность поля комментария */
+function onReportCategoryChange() {
+  const selected = document.querySelector('input[name="report-category"]:checked');
+  const isOther = selected && selected.value === "other";
+  const label = document.getElementById("report-comment-label");
+  if (label) label.textContent = isOther ? "Комментарий (обязательно)" : "Комментарий (необязательно)";
+}
+
+function closeReportModal() {
+  _reportPlaceId = null;
+  const overlay = document.getElementById("report-overlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+function closeReportModalOnOverlay(e) {
+  if (e.target === e.currentTarget) closeReportModal();
+}
+
+async function submitReport() {
+  if (!_reportPlaceId) return;
+  if (!accessToken) { alert("Нужно войти."); return; }
+
+  const statusEl = document.getElementById("report-status");
+  const selected = document.querySelector('input[name="report-category"]:checked');
+  const category = selected ? selected.value : "other";
+  const comment = (document.getElementById("report-comment")?.value || "").trim() || null;
+
+  // Для категории «Другое» комментарий обязателен
+  if (category === "other" && !comment) {
+    if (statusEl) statusEl.innerText = "Для категории «Другое» укажите комментарий.";
+    return;
+  }
+
+  if (statusEl) statusEl.innerText = "Отправка...";
+
+  try {
+    const resp = await apiFetch(`/v1/places/${_reportPlaceId}/report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category, comment }),
+    });
+
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      const msg = data.detail || "Ошибка";
+      const messages = {
+        "place_not_found": "Точка не найдена.",
+        "cannot_report_own_place": "Нельзя пожаловаться на свою точку.",
+        "already_dismissed": "Вы уже жаловались ранее, жалоба была отклонена модератором.",
+        "already_reported": "Вы уже отправили жалобу на эту точку.",
+        "place_not_approved": "Жалоба уже отправлена, точка на модерации.",
+        "invalid_category": "Некорректная категория.",
+      };
+      if (statusEl) statusEl.innerText = messages[msg] || `Ошибка: ${msg}`;
+      return;
+    }
+
+    closeReportModal();
+    refresh();
+  } catch (e) {
+    console.error(e);
+    if (statusEl) statusEl.innerText = "Ошибка сети.";
+  }
+}
+
+// Закрытие dropdown-меню по клику вне
+document.addEventListener("click", (e) => {
+  document.querySelectorAll(".mm-popup-dropdown").forEach(dd => {
+    if (dd.style.display === "block" && !dd.parentElement.contains(e.target)) {
+      dd.style.display = "none";
+    }
+  });
+});
 
 // ===================== Панель администратора =====================
 

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 from app.core.config import MEDIA_LIMIT_PER_PLACE
 from app.models.models import Group, Media, Place, User
 from app.services.groups import GroupService
+from app.services.reports import ReportService
 from app.services.users import UserService
 from app.storage import delete_place_folder, move_to_place_folder, presign_get
 from sqlalchemy import or_, text
@@ -145,6 +146,9 @@ class PlaceService:
                     "url": presign_get(m.s3_key),
                 })
 
+        # Batch-запрос: какие точки имеют pending-жалобы
+        report_place_ids = ReportService.get_reported_place_ids(db, place_ids)
+
         items: List[Dict] = []
         for place, user in rows:
             items.append({
@@ -159,6 +163,7 @@ class PlaceService:
                 "user_login": user.login if user else None,
                 "moderation_status": place.moderation_status,
                 "media": media_map.get(place.id, []),
+                "has_report": place.id in report_place_ids,
             })
         return items
 
@@ -205,9 +210,13 @@ class PlaceService:
 
         if group_ids is not None:
             requested = set(group_ids)
-            if not requested.issubset(accessible):
+            # Модератор/админ: доступ ко всем запрошенным группам (для модерации)
+            if current_user_role in ("admin", "moderator"):
+                accessible = requested
+            elif not requested.issubset(accessible):
                 raise PermissionError("No access")
-            accessible = requested
+            else:
+                accessible = requested
 
         if scope not in ("all", "mine"):
             raise ValueError("bad_scope")
@@ -259,6 +268,9 @@ class PlaceService:
                     {"id": m.id, "key": m.s3_key, "url": presign_get(m.s3_key)}
                 )
 
+        # Batch-запрос: какие точки имеют pending-жалобы
+        report_place_ids = ReportService.get_reported_place_ids(db, place_ids)
+
         items: List[Dict] = []
         for place, user, group in rows:
             items.append(
@@ -276,6 +288,7 @@ class PlaceService:
                     "moderation_status": place.moderation_status,
                     "media": media_map.get(place.id, []),
                     "group_visibility": group.visibility,
+                    "has_report": place.id in report_place_ids,
                 }
             )
         return items

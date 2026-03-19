@@ -400,14 +400,18 @@ html, body {
   justify-content:center;
   padding:24px 12px;
   z-index:9999;
+  overflow-y:auto;
 }
 
 .modal{
   width:min(520px, 100%);
+  max-height:calc(100vh - 48px);
+  overflow-y:auto;
   background:#ffffff;
   border-radius:16px;
   box-shadow:0 20px 60px rgba(0,0,0,0.25);
   border:1px solid #e5e7eb;
+  flex-shrink:0;
 }
 
 .modal-header{
@@ -424,4 +428,77 @@ html, body {
 }
 .modal-body{
   padding:12px;
+}
+
+/* Выпадающее меню «⋯» в попапе точки */
+.mm-popup-menu{
+  position:relative;
+  display:inline-block;
+}
+.mm-popup-menu-btn{
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  font-size:18px;
+  line-height:1;
+  padding:2px 6px;
+  border-radius:6px;
+  color:#6b7280;
+}
+.mm-popup-menu-btn:hover{
+  background:#f3f4f6;
+}
+.mm-popup-dropdown{
+  display:none;
+  position:absolute;
+  right:0;
+  top:100%;
+  min-width:160px;
+  background:#ffffff;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.15);
+  z-index:100;
+  padding:4px 0;
+}
+.mm-popup-dropdown.open{
+  display:block;
+}
+.mm-popup-dropdown-item{
+  display:block;
+  width:100%;
+  padding:8px 14px;
+  border:none;
+  background:transparent;
+  text-align:left;
+  cursor:pointer;
+  font-size:13px;
+  color:#dc2626;
+}
+.mm-popup-dropdown-item:hover{
+  background:#fef2f2;
+}
+
+/* Плашка жалобы в попапе */
+.mm-report-badge{
+  margin-top:4px;
+  padding:2px 8px;
+  border-radius:9999px;
+  font-size:11px;
+  display:inline-block;
+}
+.mm-report-badge--pending{
+  background:#f3f4f6;
+  color:#6b7280;
+}
+.mm-report-badge--reported{
+  background:#fef2f2;
+  color:#dc2626;
+}
+
+/* Жалобы в панели модерации */
+.mm-report-line{
+  font-size:12px;
+  color:#dc2626;
+  margin-top:2px;
 }

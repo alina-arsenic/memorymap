@@ -3,6 +3,7 @@
 from app.core.auth import get_current_user
 from app.core.deps import get_db
 from app.models.models import Place, User
+from app.services.reports import ReportService
 from app.storage import presign_get
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -51,8 +52,12 @@ def list_moderation_places(
             for m in media_rows
         ]
 
+        # Жалобы на эту точку (pending)
+        reports_list = ReportService.get_pending_reports_for_place(db, place.id)
+
         items.append({
             "id": place.id,
+            "group_id": place.group_id,
             "title": place.title,
             "note": place.note,
             "lat": place.lat,
@@ -62,6 +67,7 @@ def list_moderation_places(
             "user_login": user.login if user else None,
             "username": user.username if user else None,
             "media": media_list,
+            "reports": reports_list,
         })
 
     return {"items": items}
@@ -95,5 +101,11 @@ def moderate_place(
 
     place.moderation_status = req.status
     db.commit()
+
+    # Резолвим связанные жалобы: approve → dismissed, reject → upheld
+    if req.status == "approved":
+        ReportService.resolve_reports_for_place(db, place_id, "dismissed", current_user.id)
+    elif req.status == "rejected":
+        ReportService.resolve_reports_for_place(db, place_id, "upheld", current_user.id)
 
     return {"status": "ok", "place_id": place.id, "moderation_status": place.moderation_status}
