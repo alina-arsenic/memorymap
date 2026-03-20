@@ -1,6 +1,7 @@
 from app.api import (
     admin,
     auth,
+    blocks,
     bot_places,
     friends,
     group_invites,
@@ -37,6 +38,7 @@ app.include_router(admin.router, prefix="/v1")
 app.include_router(moderation.router, prefix="/v1")
 app.include_router(users.router, prefix="/v1")
 app.include_router(friends.router, prefix="/v1")
+app.include_router(blocks.router, prefix="/v1")
 
 # static frontend
 app.mount("/", StaticFiles(directory="frontend", html=True), name="static")

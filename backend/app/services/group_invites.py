@@ -44,6 +44,11 @@ class GroupInviteService:
         if not to_user:
             raise ValueError("Пользователь не найден")
 
+        # Проверка блокировки (в любом направлении)
+        from app.services.blocks import BlockService
+        if BlockService.is_either_blocked(db, owner.id, to_user_id):
+            raise ValueError("Невозможно отправить приглашение этому пользователю")
+
         # Проверка: получатель — друг отправителя
         if not FriendsService.are_friends(db, owner.id, to_user_id):
             raise ValueError("Приглашать можно только друзей")

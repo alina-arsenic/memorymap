@@ -550,6 +550,8 @@ function refreshFriendsUI() {
   const friends = (currentUser && Array.isArray(currentUser.friends)) ? currentUser.friends : [];
   if (friends.length === 0) {
     listEl.innerHTML = `<div class="hint">Пока друзей нет.</div>`;
+    // Не return — ниже обновляем секцию заблокированных
+    refreshBlockedListUI();
     return;
   }
 
@@ -563,6 +565,7 @@ function refreshFriendsUI() {
     );
 
     const displayName = u.login || u.username || `user#${u.id}`;
+    const escapedName = escapeHtml(displayName);
     return `
       <div class="list-item">
         <div class="meta">
@@ -570,11 +573,20 @@ function refreshFriendsUI() {
           <div class="sub">${sub || ""}</div>
         </div>
         <div class="actions">
-          <button class="btn btn-ghost btn-icon" title="Удалить из друзей" onclick="confirmRemoveFriend(${u.id}, '${escapeHtml(displayName)}')">✕</button>
+          <div class="mm-popup-menu">
+            <button class="mm-popup-menu-btn" onclick="toggleFriendMenu(this, event)" title="Действия">⋮</button>
+            <div class="mm-popup-dropdown">
+              <button class="mm-popup-dropdown-item" onclick="confirmRemoveFriend(${u.id}, '${escapedName}')">Удалить из друзей</button>
+              <button class="mm-popup-dropdown-item" onclick="confirmBlockUser(${u.id}, '${escapedName}')">Заблокировать</button>
+            </div>
+          </div>
         </div>
       </div>
     `;
   }).join("");
+
+  // Обновляем секцию заблокированных
+  refreshBlockedListUI();
 }
 
 function renderGroupLayersUI() {
@@ -1083,6 +1095,21 @@ async function changeLayerMemberRole(groupId, userId, role) {
   }
 }
 
+function toggleFriendMenu(btn, event) {
+  event.stopPropagation();
+  const dd = btn.nextElementSibling;
+  // Закрываем все остальные открытые меню
+  document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => {
+    if (el !== dd) el.classList.remove("open");
+  });
+  dd.classList.toggle("open");
+}
+
+// Закрытие popup-меню при клике вне
+document.addEventListener("click", () => {
+  document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+});
+
 async function confirmRemoveFriend(friendId, friendName) {
   if (!accessToken) { alert("Сначала войдите."); return; }
   const ok = confirm(`Точно хотите удалить из друзей ${friendName}?`);
@@ -1104,6 +1131,108 @@ async function confirmRemoveFriend(friendId, friendName) {
     console.error(e);
     alert("Ошибка сети при удалении из друзей.");
   }
+}
+
+// -------------------- BLOCK / UNBLOCK --------------------
+
+async function confirmBlockUser(userId, displayName) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+  const ok = confirm(`Заблокировать ${displayName}? Дружба будет удалена, пользователь не сможет найти вас и отправить запрос.`);
+  if (!ok) return;
+
+  try {
+    const resp = await apiFetch("/v1/blocks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось заблокировать: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    refreshFriendsUI();
+    updateNotifBadge();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети при блокировке.");
+  }
+}
+
+async function declineAndBlockUser(requestId, userId, displayName) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+  const ok = confirm(`Отклонить запрос и заблокировать ${displayName}?`);
+  if (!ok) return;
+
+  try {
+    // Сначала отклоняем запрос
+    await apiFetch(`/v1/friends/requests/${requestId}/decline`, { method: "POST" });
+
+    // Затем блокируем
+    const resp = await apiFetch("/v1/blocks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Запрос отклонён, но не удалось заблокировать: " + (data.detail || resp.status));
+    }
+    await refreshUserSnapshot();
+    await loadFriendRequestsLists();
+    refreshFriendsUI();
+    updateNotifBadge();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  }
+}
+
+async function unblockUser(userId) {
+  if (!accessToken) { alert("Сначала войдите."); return; }
+
+  try {
+    const resp = await apiFetch(`/v1/blocks/${userId}`, { method: "DELETE" });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      alert("Не удалось разблокировать: " + (data.detail || resp.status));
+      return;
+    }
+    await refreshUserSnapshot();
+    refreshBlockedListUI();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети при разблокировке.");
+  }
+}
+
+function refreshBlockedListUI() {
+  const section = document.getElementById("blocked-section");
+  const listEl = document.getElementById("blocked-list");
+  if (!section || !listEl) return;
+
+  const blocked = (currentUser && Array.isArray(currentUser.blocked_users)) ? currentUser.blocked_users : [];
+  if (blocked.length === 0) {
+    section.style.display = "none";
+    listEl.innerHTML = "";
+    return;
+  }
+
+  section.style.display = "";
+  listEl.innerHTML = blocked.map(u => {
+    const title = escapeHtml(u.login || u.username || `user#${u.id}`);
+    return `
+      <div class="list-item">
+        <div class="meta">
+          <div class="title">${title}</div>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="unblockUser(${u.id})">Разблокировать</button>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 async function uiSearchUsers() {
@@ -1327,6 +1456,7 @@ async function loadFriendRequestsLists() {
             ].filter(Boolean).join(" • ")
           );
 
+          const fromName = escapeHtml(from.login || from.username || `user#${from.id || "?"}`);
           return `
             <div class="list-item">
               <div class="meta">
@@ -1336,6 +1466,12 @@ async function loadFriendRequestsLists() {
               <div class="actions">
                 <button class="btn btn-primary" onclick="acceptFriendRequest(${r.id})">Принять</button>
                 <button class="btn" onclick="declineFriendRequest(${r.id})">Отклонить</button>
+                <div class="mm-popup-menu">
+                  <button class="mm-popup-menu-btn" onclick="toggleFriendMenu(this, event)" title="Ещё">⋮</button>
+                  <div class="mm-popup-dropdown">
+                    <button class="mm-popup-dropdown-item" onclick="declineAndBlockUser(${r.id}, ${from.id}, '${fromName}')">Заблокировать</button>
+                  </div>
+                </div>
               </div>
             </div>
           `;

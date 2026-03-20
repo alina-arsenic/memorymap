@@ -123,6 +123,19 @@ class GroupInvite(Base):
     to_user = relationship("User", foreign_keys=[to_user_id])
 
 
+class UserBlock(Base):
+    """Блокировка пользователя (blocker блокирует blocked)."""
+    __tablename__ = "user_blocks"
+
+    id = Column(Integer, primary_key=True)
+    blocker_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    blocked_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True))
+
+    blocker = relationship("User", foreign_keys=[blocker_id])
+    blocked = relationship("User", foreign_keys=[blocked_id])
+
+
 class Report(Base):
     """Жалоба на точку (постмодерация)."""
     __tablename__ = "reports"

@@ -64,6 +64,11 @@ class FriendsService:
         if not to_user:
             raise ValueError("User not found")
 
+        # Проверка блокировки (в любом направлении)
+        from app.services.blocks import BlockService
+        if BlockService.is_either_blocked(db, from_user.id, to_user_id):
+            raise ValueError("Cannot send friend request to this user")
+
         # Already friends?
         if FriendsService.are_friends(db, from_user.id, to_user_id):
             return {"status": "already_friends"}

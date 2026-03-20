@@ -16,7 +16,9 @@ from app.models.models import (
     Place,
     TelegramLinkCode,
     User,
+    UserBlock,
 )
+from app.services.blocks import BlockService
 from app.services.friends import FriendsService
 from app.services.group_invites import GroupInviteService
 from app.services.groups import GroupService
@@ -43,6 +45,7 @@ def me(
     friends = UserService.list_friends(db, current_user)
     inbox_count = FriendsService.inbox_count(db, current_user)
     group_invites_count = GroupInviteService.inbox_count(db, current_user.id)
+    blocked_users = BlockService.list_blocked(db, current_user)
 
     return {
         "id": current_user.id,
@@ -54,6 +57,7 @@ def me(
         "friends": friends,
         "friend_requests_inbox_count": inbox_count,
         "group_invites_inbox_count": group_invites_count,
+        "blocked_users": blocked_users,
     }
 
 # Legacy endpoint: keep path for compatibility, but now it creates a friend REQUEST by tg_id.
@@ -139,7 +143,12 @@ def delete_account(
         synchronize_session=False
     )
 
-    # 6. Удаляем коды верификации и привязки Telegram
+    # 6. Удаляем блокировки пользователя
+    db.query(UserBlock).filter(
+        (UserBlock.blocker_id == uid) | (UserBlock.blocked_id == uid)
+    ).delete(synchronize_session=False)
+
+    # 7. Удаляем коды верификации и привязки Telegram
     db.query(EmailVerificationCode).filter(EmailVerificationCode.user_id == uid).delete(
         synchronize_session=False
     )
@@ -147,7 +156,7 @@ def delete_account(
         synchronize_session=False
     )
 
-    # 7. Удаляем самого пользователя
+    # 8. Удаляем самого пользователя
     db.delete(current_user)
     db.commit()
 

@@ -39,10 +39,16 @@ class UserService:
         return None
 
     @staticmethod
-    def search_users(db: Session, q: str, limit: int = 20) -> List[Dict]:
+    def search_users(db: Session, q: str, limit: int = 20, current_user_id: Optional[int] = None) -> List[Dict]:
         q = (q or "").strip()
         if not q:
             return []
+
+        # Собираем ID заблокированных (в обе стороны) для фильтрации
+        exclude_ids: set = set()
+        if current_user_id is not None:
+            from app.services.blocks import BlockService
+            exclude_ids = BlockService.get_blocked_ids(db, current_user_id) | BlockService.get_blocked_by_ids(db, current_user_id)
 
         conditions = []
         # string match
@@ -54,9 +60,14 @@ class UserService:
         if q.isdigit():
             conditions.append(User.tg_id == int(q))
 
+        query = db.query(User).filter(or_(*conditions))
+
+        # Исключаем заблокированных из результатов
+        if exclude_ids:
+            query = query.filter(~User.id.in_(exclude_ids))
+
         users = (
-            db.query(User)
-            .filter(or_(*conditions))
+            query
             .order_by(User.id.asc())
             .limit(max(1, min(limit, 50)))
             .all()

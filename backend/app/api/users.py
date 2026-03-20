@@ -16,4 +16,4 @@ def search_users(
 ):
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return {"items": UserService.search_users(db, q=q, limit=limit)}
+    return {"items": UserService.search_users(db, q=q, limit=limit, current_user_id=current_user.id)}
