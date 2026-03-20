@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List, Set
 
-from app.models.models import UserBlock, User
+from app.models.models import User, UserBlock
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
