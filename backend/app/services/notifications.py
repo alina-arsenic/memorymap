@@ -91,7 +91,7 @@ class NotificationService:
         """Количество непрочитанных уведомлений."""
         return (
             db.query(func.count(Notification.id))
-            .filter(Notification.user_id == user_id, Notification.is_read == False)
+            .filter(Notification.user_id == user_id, Notification.is_read.is_(False))
             .scalar()
         ) or 0
 
@@ -114,7 +114,7 @@ class NotificationService:
         """Пометить все уведомления прочитанными. Возвращает количество обновлённых."""
         count = (
             db.query(Notification)
-            .filter(Notification.user_id == user_id, Notification.is_read == False)
+            .filter(Notification.user_id == user_id, Notification.is_read.is_(False))
             .update({"is_read": True}, synchronize_session=False)
         )
         db.commit()
