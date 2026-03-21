@@ -3,6 +3,7 @@ from app.api import (
     auth,
     blocks,
     bot_places,
+    comments,
     friends,
     group_invites,
     groups,
@@ -10,6 +11,7 @@ from app.api import (
     me,
     media,
     moderation,
+    notifications,
     places,
     reports,
     users,
@@ -34,6 +36,8 @@ app.include_router(groups.router, prefix="/v1")
 app.include_router(layers.router, prefix="/v1")
 app.include_router(places.router, prefix="/v1")
 app.include_router(reports.router, prefix="/v1")
+app.include_router(comments.router, prefix="/v1")
+app.include_router(notifications.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(moderation.router, prefix="/v1")
 app.include_router(users.router, prefix="/v1")

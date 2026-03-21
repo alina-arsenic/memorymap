@@ -461,6 +461,13 @@ html, body {
   z-index:100;
   padding:4px 0;
 }
+/* Dropdown в комментариях — fixed, чтобы не обрезался overflow контейнера */
+.comment-actions .mm-popup-dropdown{
+  position:fixed;
+  right:auto;
+  top:auto;
+  z-index:10000;
+}
 .mm-popup-dropdown.open{
   display:block;
 }
@@ -501,4 +508,278 @@ html, body {
   font-size:12px;
   color:#dc2626;
   margin-top:2px;
+}
+
+/* Кнопка комментариев в попапе */
+.mm-comments-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  margin-top:6px;
+  padding:4px 10px;
+  border-radius:9999px;
+  border:1px solid #d1d5db;
+  background:#f3f4f6;
+  font-size:12px;
+  cursor:pointer;
+  color:#374151;
+}
+.mm-comments-btn:hover{
+  background:#e5e7eb;
+}
+
+/* Список комментариев в модалке */
+.comments-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.comment-item{
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  padding:8px 10px;
+  background:#f9fafb;
+  position:relative;
+}
+.comment-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:4px;
+}
+.comment-author{
+  font-size:13px;
+  font-weight:600;
+  color:#374151;
+  max-width:200px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.comment-time{
+  font-size:11px;
+  color:#9ca3af;
+  cursor:default;
+}
+.comment-text{
+  font-size:13px;
+  line-height:1.4;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  color:#111827;
+}
+.comment-toggle-text{
+  background:none;
+  border:none;
+  color:#6b7280;
+  font-size:12px;
+  cursor:pointer;
+  padding:0;
+  margin-top:2px;
+  display:inline-block;
+}
+.comment-toggle-text:hover{
+  color:#374151;
+}
+.comment-delete-btn{
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  font-size:16px;
+  color:#9ca3af;
+  padding:2px 4px;
+  border-radius:6px;
+  line-height:1;
+}
+.comment-delete-btn:hover{
+  background:#fee2e2;
+  color:#dc2626;
+}
+
+/* Нейтральный пункт меню (Редактировать, Ответить) */
+.mm-popup-dropdown-item--default{
+  color:#374151;
+}
+.mm-popup-dropdown-item--default:hover{
+  background:#f3f4f6;
+}
+
+/* Ответ-комментарий — отступ и левый бордер */
+.comment-item--reply{
+  margin-left:24px;
+  border-left:3px solid #e5e7eb;
+  border-radius:0 12px 12px 0;
+}
+/* Подсветка комментария при переходе из уведомления */
+.comment-highlight{
+  animation: comment-flash 2s ease-out;
+}
+@keyframes comment-flash{
+  0%{background-color:#dbeafe;}
+  100%{background-color:transparent;}
+}
+
+/* Метка «↩ @автор» у ответов */
+.comment-reply-to{
+  font-size:12px;
+  color:#6b7280;
+  margin-bottom:2px;
+  cursor:pointer;
+}
+.comment-reply-to:hover{
+  color:#3b82f6;
+}
+
+/* «(изменено)» серым курсивом */
+.comment-edited{
+  font-size:11px;
+  color:#9ca3af;
+  font-style:italic;
+  margin-left:4px;
+}
+
+/* Inline-редактирование */
+.comment-edit-area{
+  width:100%;
+  padding:4px 6px;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+  font-size:13px;
+  resize:vertical;
+  min-height:40px;
+  max-height:200px;
+  overflow-y:auto;
+  outline:none;
+}
+.comment-edit-area:focus{
+  border-color:#6366f1;
+}
+.comment-edit-actions{
+  display:flex;
+  gap:6px;
+  margin-top:4px;
+  justify-content:flex-end;
+}
+
+/* Строка действий под текстом комментария */
+.comment-actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:4px;
+  font-size:12px;
+  color:#9ca3af;
+}
+
+/* Кнопка «Ответить» под комментарием */
+.comment-reply-btn{
+  background:none;
+  border:none;
+  cursor:pointer;
+  font-size:12px;
+  color:#6b7280;
+  font-weight:600;
+  padding:0;
+}
+.comment-reply-btn:hover{
+  color:#374151;
+}
+
+/* «Просмотреть N ответов» */
+.comment-replies-toggle{
+  background:none;
+  border:none;
+  cursor:pointer;
+  font-size:12px;
+  color:#6b7280;
+  padding:4px 0 4px 24px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.comment-replies-toggle:hover{
+  color:#374151;
+}
+.comment-replies-toggle::before{
+  content:"";
+  display:inline-block;
+  width:24px;
+  height:1px;
+  background:#d1d5db;
+}
+
+/* Уведомления в модалке колокольчика */
+.notif-section{
+  margin-top:0;
+}
+.notif-item{
+  padding:8px 10px;
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  background:#ffffff;
+  margin-bottom:6px;
+  cursor:pointer;
+  transition:background 0.1s;
+}
+.notif-item:hover{
+  background:#f3f4f6;
+}
+.notif-item--unread{
+  background:#eff6ff;
+  border-color:#bfdbfe;
+}
+.notif-item--unread:hover{
+  background:#dbeafe;
+}
+.notif-text{
+  font-size:13px;
+  line-height:1.4;
+  color:#111827;
+}
+.notif-time{
+  font-size:11px;
+  color:#9ca3af;
+  margin-top:2px;
+}
+.notif-read-all-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:4px 12px;
+  border-radius:9999px;
+  border:1px solid #d1d5db;
+  background:#f3f4f6;
+  font-size:12px;
+  cursor:pointer;
+  margin-bottom:8px;
+}
+.notif-read-all-btn:hover{
+  background:#e5e7eb;
+}
+
+/* Индикатор ответа в инпуте */
+.comment-reply-indicator{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:4px 8px;
+  background:#eff6ff;
+  border-radius:8px 8px 0 0;
+  border:1px solid #bfdbfe;
+  border-bottom:none;
+  font-size:12px;
+  color:#3b82f6;
+}
+.comment-reply-indicator button{
+  background:none;
+  border:none;
+  cursor:pointer;
+  font-size:14px;
+  color:#6b7280;
+  padding:0 2px;
+  line-height:1;
+}
+.comment-reply-indicator button:hover{
+  color:#111827;
 }

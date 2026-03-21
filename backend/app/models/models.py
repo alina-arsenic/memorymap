@@ -136,6 +136,38 @@ class UserBlock(Base):
     blocked = relationship("User", foreign_keys=[blocked_id])
 
 
+class Comment(Base):
+    """Комментарий к точке."""
+    __tablename__ = "comments"
+    id = Column(Integer, primary_key=True)
+    place_id = Column(Integer, ForeignKey("places.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True))
+    parent_id = Column(Integer, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True)
+    reply_to_id = Column(Integer, ForeignKey("comments.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+    place = relationship("Place")
+    user = relationship("User")
+    parent = relationship("Comment", remote_side=[id], foreign_keys=[parent_id])
+
+
+class Notification(Base):
+    """Уведомление пользователя."""
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    type = Column(Text, nullable=False)  # comment_on_place | reply_to_comment
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    place_id = Column(Integer, ForeignKey("places.id", ondelete="CASCADE"), nullable=True)
+    comment_id = Column(Integer, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True)
+    is_read = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True))
+    user = relationship("User", foreign_keys=[user_id])
+    actor = relationship("User", foreign_keys=[actor_id])
+    place = relationship("Place")
+
+
 class Report(Base):
     """Жалоба на точку (постмодерация)."""
     __tablename__ = "reports"

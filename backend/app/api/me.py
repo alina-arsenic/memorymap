@@ -22,6 +22,7 @@ from app.services.blocks import BlockService
 from app.services.friends import FriendsService
 from app.services.group_invites import GroupInviteService
 from app.services.groups import GroupService
+from app.services.notifications import NotificationService
 from app.services.users import UserService
 from app.storage import delete_place_folder
 from fastapi import APIRouter, Depends, HTTPException
@@ -46,6 +47,7 @@ def me(
     inbox_count = FriendsService.inbox_count(db, current_user)
     group_invites_count = GroupInviteService.inbox_count(db, current_user.id)
     blocked_users = BlockService.list_blocked(db, current_user)
+    notifications_count = NotificationService.count_unread(db, current_user.id)
 
     return {
         "id": current_user.id,
@@ -58,6 +60,7 @@ def me(
         "friend_requests_inbox_count": inbox_count,
         "group_invites_inbox_count": group_invites_count,
         "blocked_users": blocked_users,
+        "notifications_count": notifications_count,
     }
 
 # Legacy endpoint: keep path for compatibility, but now it creates a friend REQUEST by tg_id.

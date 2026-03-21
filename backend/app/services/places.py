@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 from app.core.config import MEDIA_LIMIT_PER_PLACE
 from app.models.models import Group, Media, Place, User
+from app.services.comments import CommentService
 from app.services.groups import GroupService
 from app.services.reports import ReportService
 from app.services.users import UserService
@@ -149,6 +150,9 @@ class PlaceService:
         # Batch-запрос: какие точки имеют pending-жалобы
         report_place_ids = ReportService.get_reported_place_ids(db, place_ids)
 
+        # Batch-запрос: количество комментариев для каждой точки
+        comments_count_map = CommentService.count_for_places(db, place_ids)
+
         items: List[Dict] = []
         for place, user in rows:
             items.append({
@@ -164,6 +168,7 @@ class PlaceService:
                 "moderation_status": place.moderation_status,
                 "media": media_map.get(place.id, []),
                 "has_report": place.id in report_place_ids,
+                "comments_count": comments_count_map.get(place.id, 0),
             })
         return items
 
@@ -271,6 +276,9 @@ class PlaceService:
         # Batch-запрос: какие точки имеют pending-жалобы
         report_place_ids = ReportService.get_reported_place_ids(db, place_ids)
 
+        # Batch-запрос: количество комментариев для каждой точки
+        comments_count_map = CommentService.count_for_places(db, place_ids)
+
         items: List[Dict] = []
         for place, user, group in rows:
             items.append(
@@ -288,7 +296,9 @@ class PlaceService:
                     "moderation_status": place.moderation_status,
                     "media": media_map.get(place.id, []),
                     "group_visibility": group.visibility,
+                    "group_is_personal": group.is_personal,
                     "has_report": place.id in report_place_ids,
+                    "comments_count": comments_count_map.get(place.id, 0),
                 }
             )
         return items

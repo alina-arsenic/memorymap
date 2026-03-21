@@ -324,6 +324,16 @@
 
           <div class="field-label">Приглашения в слои</div>
           <div id="group-invites-inbox" class="list" style="margin-top: 8px"></div>
+
+          <div class="divider" style="margin: 12px 0"></div>
+
+          <div class="notif-section">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div class="field-label" style="margin-bottom:0;">Уведомления</div>
+              <button class="notif-read-all-btn" onclick="markAllNotificationsRead()">Прочитать все</button>
+            </div>
+            <div id="notifications-list"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -370,6 +380,41 @@
         </div>
       </div>
     </div>
+    <!-- MODAL: Комментарии к точке -->
+    <div
+      id="comments-overlay"
+      class="modal-overlay"
+      style="display: none"
+      onclick="closeCommentsModalOnOverlay(event)"
+    >
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div class="modal-title">Комментарии</div>
+          <button class="icon-btn" onclick="closeCommentsModal()" title="Закрыть">✕</button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;max-height:60vh;">
+          <div id="comments-list" class="comments-list" style="flex:1;overflow-y:auto;"></div>
+          <div id="comments-form" style="margin-top:8px;display:none;">
+            <div id="comment-reply-indicator" class="comment-reply-indicator" style="display:none;">
+              <span id="comment-reply-indicator-text"></span>
+              <button onclick="cancelReply()" title="Отменить">✕</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input
+                id="comment-input"
+                class="input"
+                placeholder="Написать комментарий..."
+                maxlength="1000"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();submitComment();}"
+              />
+              <button class="btn btn-primary btn-icon" onclick="submitComment()" title="Отправить">➤</button>
+            </div>
+            <div id="comment-status" class="hint" style="margin-top:4px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- MODAL: Жалоба на точку -->
     <div
       id="report-overlay"
