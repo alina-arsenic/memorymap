@@ -8,7 +8,13 @@ from app.services.comments import CommentService
 from app.services.groups import GroupService
 from app.services.reports import ReportService
 from app.services.users import UserService
-from app.storage import delete_place_folder, move_to_place_folder, presign_get
+from app.storage import (
+    delete_place_folder,
+    detect_mime,
+    move_to_place_folder,
+    presign_get,
+    validate_temp_key,
+)
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
@@ -64,12 +70,13 @@ class PlaceService:
         db.refresh(place)
 
         for key in (media_keys or []):
+            validate_temp_key(key, uid)
             new_key = move_to_place_folder(key, place.id)
             db.add(Media(
                 place_id=place.id,
                 user_id=uid,
                 s3_key=new_key,
-                mime="image/jpeg",
+                mime=detect_mime(key),
                 status="ready",
             ))
 

@@ -248,6 +248,7 @@
 
             <div class="field-label" style="margin-top: 6px">Фотографии (до 12 шт.)</div>
             <input id="web-photos" type="file" accept="image/*" multiple class="input" />
+            <div id="web-photos-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
 
             <div class="field-label" style="margin-top: 6px">Куда добавить (слой)</div>
             <select id="web-group" class="input"></select>
@@ -323,6 +324,7 @@
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
     <script src="/app.js" defer></script>
     <div id="mm-edit-modal" class="mm-modal" style="display: none">
       <div class="mm-modal-card">

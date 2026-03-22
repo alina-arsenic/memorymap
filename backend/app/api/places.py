@@ -1,11 +1,11 @@
 from typing import List, Optional
 
 from app.core.auth import get_current_user
-from app.core.config import BOT_API_SECRET
+from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
 from app.core.deps import get_db
 from app.models.models import Media, Place, User
 from app.services.places import PlaceService
-from app.storage import move_to_place_folder
+from app.storage import detect_mime, move_to_place_folder, validate_temp_key
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -229,8 +229,10 @@ def add_media(
     if place.user_id != current_user.id:
         raise HTTPException(403, "Forbidden")
 
+    validate_temp_key(req.temp_key, current_user.id)
+
     count = db.query(Media).filter(Media.place_id == place_id).count()
-    if count >= 12:
+    if count >= MEDIA_LIMIT_PER_PLACE:
         raise HTTPException(status_code=400, detail="media_limit")
 
     new_key = move_to_place_folder(req.temp_key, place_id)
@@ -239,7 +241,7 @@ def add_media(
         place_id=place_id,
         user_id=current_user.id,
         s3_key=new_key,
-        mime="image/jpeg",
+        mime=detect_mime(req.temp_key),
         status="ready",
     )
     db.add(m)

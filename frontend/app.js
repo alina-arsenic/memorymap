@@ -781,6 +781,10 @@ function uiLogout() {
   if (regEmail) regEmail.value = "";
   if (regPass) regPass.value = "";
 
+  // очистить превью фото
+  _selectedFiles = [];
+  _renderPhotoPreview();
+
   // убрать временный маркер и сбросить координаты
   if (tempMarker) {
     tempMarker.remove();
@@ -1465,6 +1469,14 @@ window.addEventListener("resize", () => {
 
 // Закрытие popup-меню, редактирования и модалки комментариев по Escape
 document.addEventListener("keydown", (e) => {
+  // Приоритет 0: фото-галерея (Escape/стрелки)
+  if (_galleryState) {
+    if (e.key === "Escape") { closeGallery(); return; }
+    if (e.key === "ArrowLeft") { galleryNav(-1); return; }
+    if (e.key === "ArrowRight") { galleryNav(1); return; }
+    return; // блокируем остальные клавиши пока галерея открыта
+  }
+
   if (e.key === "Escape") {
     // Приоритет 1: закрываем dropdown-меню
     const openDropdowns = document.querySelectorAll(".comment-actions .mm-popup-dropdown.open");
@@ -2075,11 +2087,10 @@ if (!accessToken) {
 
 const titleInput = document.getElementById("web-title");
 const noteInput = document.getElementById("web-note");
-const photosInput = document.getElementById("web-photos");
 
 const titleRaw = titleInput ? titleInput.value : "";
 const note = noteInput ? noteInput.value.trim() : "";
-const files = photosInput && photosInput.files ? Array.from(photosInput.files) : [];
+const files = _selectedFiles.slice(); // копия массива выбранных файлов
 
 let titleFinal = (titleRaw || "").trim();
 if (!titleFinal) {
@@ -2153,7 +2164,8 @@ try {
     // очищаем форму и временный пин
     if (titleInput) titleInput.value = "";
     if (noteInput) noteInput.value = "";
-    if (photosInput) photosInput.value = "";
+    _selectedFiles = [];
+    _renderPhotoPreview();
     const coordsEl = document.getElementById("web-coords");
     if (coordsEl) {
     coordsEl.textContent = "ПКМ по карте, чтобы выбрать точку.";
@@ -2175,10 +2187,27 @@ try {
 }
 }
 
+// Конвертация HEIC/HEIF в JPEG на клиенте (для iPhone фото).
+// Возвращает null если HEIC и heic2any недоступен — вызывающий код должен пропустить файл.
+async function convertHeicIfNeeded(file) {
+  var isHeic = file.type === "image/heic" || file.type === "image/heif"
+    || file.name.toLowerCase().endsWith(".heic")
+    || file.name.toLowerCase().endsWith(".heif");
+  if (!isHeic) return file;
+  if (typeof heic2any === "undefined") {
+    console.warn("heic2any не загружен, HEIC-файл пропущен:", file.name);
+    return null;
+  }
+  var blob = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+  return new File([blob], file.name.replace(/\.hei[cf]$/i, ".jpg"), { type: "image/jpeg" });
+}
+
 async function uploadPhotos(files) {
 const mediaKeys = [];
 
-for (const file of files) {
+for (const origFile of files) {
+    const file = await convertHeicIfNeeded(origFile);
+    if (!file) continue; // HEIC без heic2any — пропускаем
     const ext = file.name.includes(".")
     ? file.name.split(".").pop()
     : "";
@@ -2638,74 +2667,258 @@ document.addEventListener("click", async (e) => {
   refresh();
 });
 
-// ========= Фото: открытие модалки =========
-document.addEventListener("click", (e) => {
-  const img = e.target.closest(".mm-photo-thumb");
+// ========= Фото-галерея (lightbox) =========
+let _galleryState = null; // null = закрыта, { urls: string[], index: number }
+
+function openGallery(urls, index) {
+  // Защита от двойного клика — удаляем старую галерею
+  var old = document.getElementById("mm-photo-modal");
+  if (old) old.remove();
+
+  _galleryState = { urls: urls, index: index };
+  document.body.style.overflow = "hidden";
+
+  var modal = document.createElement("div");
+  modal.id = "mm-photo-modal";
+  modal.className = "mm-photo-modal";
+
+  var closeBtn = document.createElement("button");
+  closeBtn.className = "mm-gallery-close";
+  closeBtn.innerHTML = "&#10005;";
+  closeBtn.onclick = function(e) { e.stopPropagation(); closeGallery(); };
+
+  var prevBtn = document.createElement("button");
+  prevBtn.className = "mm-gallery-arrow mm-gallery-prev";
+  prevBtn.innerHTML = "&#8249;";
+  prevBtn.style.display = urls.length <= 1 ? "none" : "";
+  prevBtn.onclick = function(e) { e.stopPropagation(); galleryNav(-1); };
+
+  var nextBtn = document.createElement("button");
+  nextBtn.className = "mm-gallery-arrow mm-gallery-next";
+  nextBtn.innerHTML = "&#8250;";
+  nextBtn.style.display = urls.length <= 1 ? "none" : "";
+  nextBtn.onclick = function(e) { e.stopPropagation(); galleryNav(1); };
+
+  var img = document.createElement("img");
+  img.className = "mm-gallery-img";
+
+  modal.appendChild(closeBtn);
+  modal.appendChild(prevBtn);
+  modal.appendChild(img);
+  modal.appendChild(nextBtn);
+
+  // Закрытие по клику на фон (не на дочерние элементы)
+  modal.onclick = function(e) {
+    if (e.target === modal) closeGallery();
+  };
+
+  // Touch-свайп для мобильных
+  var touchStartX = 0;
+  modal.addEventListener("touchstart", function(e) {
+    touchStartX = e.changedTouches[0].clientX;
+  }, { passive: true });
+  modal.addEventListener("touchmove", function(e) {
+    e.preventDefault(); // блокируем нативный скролл/bounce внутри галереи
+  }, { passive: false });
+  modal.addEventListener("touchend", function(e) {
+    var delta = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(delta) > 50) {
+      galleryNav(delta < 0 ? 1 : -1);
+    }
+  });
+
+  document.body.appendChild(modal);
+  _galleryUpdateView();
+}
+
+function closeGallery() {
+  var modal = document.getElementById("mm-photo-modal");
+  if (modal) modal.remove();
+  _galleryState = null;
+  document.body.style.overflow = "";
+}
+
+function galleryNav(delta) {
+  if (!_galleryState || _galleryState.urls.length <= 1) return;
+  var len = _galleryState.urls.length;
+  _galleryState.index = (_galleryState.index + delta + len) % len;
+  _galleryUpdateView();
+}
+
+function _galleryUpdateView() {
+  if (!_galleryState) return;
+  var modal = document.getElementById("mm-photo-modal");
+  if (!modal) return;
+  var img = modal.querySelector(".mm-gallery-img");
   if (!img) return;
 
+  var idx = _galleryState.index;
+  var url = _galleryState.urls[idx];
+  // Прелоадим фото: старое остаётся видимым, новое подменяется мгновенно когда готово.
+  // Проверяем idx при onload — при быстрых кликах устаревший preload не перезапишет актуальное фото.
+  var preload = new Image();
+  preload.onload = function() {
+    if (_galleryState && _galleryState.index === idx) img.src = url;
+  };
+  preload.onerror = function() {
+    if (_galleryState && _galleryState.index === idx) img.src = url;
+  };
+  preload.src = url;
+}
+
+// Делегированный click handler для открытия галереи
+document.addEventListener("click", function(e) {
+  var img = e.target.closest(".mm-photo-thumb");
+  if (!img) return;
   e.preventDefault();
   e.stopPropagation();
 
-  const url = img.getAttribute("data-full") || img.src;
+  // Собираем все фото из контейнера.
+  // В попапах img обёрнут в wrapper-div (60×60), в модерации — прямо в flex-div.
+  var container = img.parentElement;
+  if (container.querySelectorAll(".mm-photo-thumb").length <= 1) {
+    container = container.parentElement;
+  }
+  var thumbs = container.querySelectorAll(".mm-photo-thumb");
+  var urls = Array.from(thumbs).map(function(t) { return t.getAttribute("data-full") || t.src; });
+  var index = Array.from(thumbs).indexOf(img);
 
-  let modal = document.getElementById("mm-photo-modal");
-  if (!modal) {
-    modal = document.createElement("div");
-    modal.id = "mm-photo-modal";
-    modal.className = "mm-photo-modal";
-    modal.addEventListener("click", () => modal.remove());
+  openGallery(urls, index >= 0 ? index : 0);
+});
 
-    const bigImg = document.createElement("img");
-    modal.appendChild(bigImg);
+// ========= Превью фото перед загрузкой =========
+let _selectedFiles = []; // файлы выбранные для загрузки (форма «Добавить точку»)
 
-    document.body.appendChild(modal);
+document.getElementById("web-photos").addEventListener("change", async function(e) {
+  var inp = e.target;
+  var newFiles = inp.files ? Array.from(inp.files) : [];
+  // Добавляем к уже выбранным, конвертируя HEIC→JPEG
+  var heicSkipped = 0;
+  for (var i = 0; i < newFiles.length; i++) {
+    if (_selectedFiles.length >= 12) break;
+    var file = await convertHeicIfNeeded(newFiles[i]);
+    if (!file) { heicSkipped++; continue; }
+    _selectedFiles.push(file);
+  }
+  inp.value = ""; // сбрасываем input чтобы можно было выбрать ещё
+  _renderPhotoPreview();
+  if (heicSkipped > 0) {
+    alert("HEIC-фото не удалось обработать. Попробуйте конвертировать в JPEG перед загрузкой.");
+  }
+});
+
+function _renderPhotoPreview() {
+  var container = document.getElementById("web-photos-preview");
+  if (!container) return;
+
+  // Освобождаем старые ObjectURL
+  container.querySelectorAll("img").forEach(function(img) {
+    if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+  });
+
+  if (_selectedFiles.length === 0) {
+    container.innerHTML = "";
+    return;
   }
 
-  const bigImg = modal.querySelector("img");
-  bigImg.src = url;
-});
+  var html = "";
+  for (var i = 0; i < _selectedFiles.length; i++) {
+    var url = URL.createObjectURL(_selectedFiles[i]);
+    html += '<div class="mm-preview-item">'
+      + '<img src="' + url + '" alt="">'
+      + '<button class="mm-preview-remove" data-idx="' + i + '">&times;</button>'
+      + '</div>';
+  }
+  container.innerHTML = html;
+
+  // Обработчики удаления
+  container.querySelectorAll(".mm-preview-remove").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var idx = Number(this.getAttribute("data-idx"));
+      _selectedFiles.splice(idx, 1);
+      _renderPhotoPreview();
+    });
+  });
+}
 
 // ========= Фото: добавить/удалить =========
 let _mmUploadPlaceId = null;
 
 document.addEventListener("click", async (e) => {
   // удалить фото (крестик)
-  const delMediaBtn = e.target.closest(".mm-del-media-btn");
+  var delMediaBtn = e.target.closest(".mm-del-media-btn");
   if (delMediaBtn) {
     e.preventDefault();
     e.stopPropagation();
 
-    const mediaId = delMediaBtn.getAttribute("data-media-id");
+    var mediaId = delMediaBtn.getAttribute("data-media-id");
     if (!mediaId) return;
 
     if (!accessToken) { alert("Нужно войти."); return; }
     if (!confirm("Удалить фото?")) return;
 
-    const resp = await apiFetch(`/v1/media/${mediaId}`, { method: "DELETE" });
+    // Сохраняем ссылки на DOM ДО await (после удаления wrapper будет недоступен)
+    var wrapper = delMediaBtn.closest("div[style*='position:relative']");
+    var popup = delMediaBtn.closest(".mm-popup");
+
+    var resp = await apiFetch("/v1/media/" + mediaId, { method: "DELETE" });
     if (!resp.ok) { alert("Не удалось удалить фото (код " + resp.status + ")"); return; }
 
-    refresh();
+    // Точечное обновление DOM попапа вместо refresh()
+    if (wrapper) {
+      var photosContainer = wrapper.parentElement;
+      wrapper.remove();
+      // Если фото не осталось — убираем контейнер
+      if (photosContainer && !photosContainer.querySelector(".mm-photo-thumb")) {
+        photosContainer.remove();
+      }
+    }
+
+    // Обновляем кнопку «Добавить фото»
+    if (popup) {
+      var addBtn = popup.querySelector(".mm-add-photo-btn");
+      if (addBtn) {
+        var have = Math.max(0, Number(addBtn.getAttribute("data-have") || "0") - 1);
+        addBtn.setAttribute("data-have", String(have));
+      } else {
+        // Кнопка не была видна (лимит 12 был достигнут) — создаём
+        var placeIdEl = popup.querySelector(".mm-delete-btn[data-id], .mm-edit-btn[data-id]");
+        if (placeIdEl) {
+          var remainingThumbs = popup.querySelectorAll(".mm-photo-thumb").length;
+          var btnDiv = document.createElement("div");
+          btnDiv.style.marginTop = "6px";
+          var btn = document.createElement("button");
+          btn.className = "btn mm-add-photo-btn";
+          btn.setAttribute("data-id", placeIdEl.getAttribute("data-id"));
+          btn.setAttribute("data-have", String(remainingThumbs));
+          btn.textContent = "Добавить фото";
+          btnDiv.appendChild(btn);
+          var photosDiv = popup.querySelector("div[style*='flex-wrap']");
+          if (photosDiv) popup.insertBefore(btnDiv, photosDiv);
+        }
+      }
+    }
     return;
   }
 
   // добавить фото
-  const addPhotoBtn = e.target.closest(".mm-add-photo-btn");
+  var addPhotoBtn = e.target.closest(".mm-add-photo-btn");
   if (addPhotoBtn) {
     e.preventDefault();
     e.stopPropagation();
 
     if (!accessToken) { alert("Нужно войти."); return; }
 
-    const placeId = addPhotoBtn.getAttribute("data-id");
-    const have = Number(addPhotoBtn.getAttribute("data-have") || "0");
-    const remaining = 12 - have;
+    var placeId = addPhotoBtn.getAttribute("data-id");
+    var haveNow = Number(addPhotoBtn.getAttribute("data-have") || "0");
+    var remaining = 12 - haveNow;
 
     if (!placeId) return;
     if (remaining <= 0) { alert("Лимит фото достигнут."); return; }
 
     _mmUploadPlaceId = placeId;
 
-    const inp = document.getElementById("mm-photo-input");
+    var inp = document.getElementById("mm-photo-input");
     inp.value = "";
     inp.setAttribute("data-remaining", String(remaining));
     inp.click();
@@ -2713,49 +2926,63 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-document.getElementById("mm-photo-input").addEventListener("change", async (e) => {
-  const inp = e.target;
-  const files = inp.files ? Array.from(inp.files) : [];
+document.getElementById("mm-photo-input").addEventListener("change", async function(e) {
+  var inp = e.target;
+  var files = inp.files ? Array.from(inp.files) : [];
   if (!files.length) return;
 
-  const remaining = Number(inp.getAttribute("data-remaining") || "0");
-  const placeId = _mmUploadPlaceId;
+  var remaining = Number(inp.getAttribute("data-remaining") || "0");
+  var placeId = _mmUploadPlaceId;
   if (!placeId) return;
 
   if (files.length > remaining) {
-    alert(`Можно добавить только ${remaining} фото(шт).`);
+    alert("Можно добавить только " + remaining + " фото(шт).");
     return;
   }
 
+  // Собираем загруженные фото для точечного обновления DOM
+  var newPhotos = [];
   try {
-    for (const file of files) {
-      const ext = file.name.includes(".") ? file.name.split(".").pop() : "";
-      const mime = file.type || "image/jpeg";
+    for (var fi = 0; fi < files.length; fi++) {
+      var file = await convertHeicIfNeeded(files[fi]);
+      if (!file) continue; // HEIC без heic2any — пропускаем
+      var ext = file.name.includes(".") ? file.name.split(".").pop() : "";
+      var mime = file.type || "image/jpeg";
 
-      const presignResp = await apiFetch("/v1/media/presign-upload", {
+      var presignResp = await apiFetch("/v1/media/presign-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mime, ext, place_id: Number(placeId) }),
+        body: JSON.stringify({ mime: mime, ext: ext, place_id: Number(placeId) }),
       });
       if (!presignResp.ok) throw new Error("presign " + presignResp.status);
-      const u = await presignResp.json();
+      var u = await presignResp.json();
 
-      const putResp = await fetch(u.url, {
+      var putResp = await fetch(u.url, {
         method: "PUT",
         headers: { "Content-Type": mime },
         body: file,
       });
       if (!putResp.ok) throw new Error("put " + putResp.status);
 
-      const linkResp = await apiFetch(`/v1/places/${placeId}/media`, {
+      var linkResp = await apiFetch("/v1/places/" + placeId + "/media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ temp_key: u.key }),
       });
       if (!linkResp.ok) throw new Error("link " + linkResp.status);
+
+      var linkData = await linkResp.json();
+
+      // Получаем presigned URL для отображения миниатюры
+      var dlResp = await apiFetch("/v1/media/presign-download?key=" + encodeURIComponent(linkData.key));
+      if (dlResp.ok) {
+        var dl = await dlResp.json();
+        newPhotos.push({ id: linkData.id, url: dl.url });
+      }
     }
 
-    refresh();
+    // Точечное обновление DOM попапа вместо refresh()
+    _updatePopupAfterUpload(placeId, newPhotos);
   } catch (err) {
     console.error(err);
     alert("Ошибка при добавлении фото.");
@@ -2763,6 +2990,66 @@ document.getElementById("mm-photo-input").addEventListener("change", async (e) =
     _mmUploadPlaceId = null;
   }
 });
+
+// Добавляет загруженные фото в открытый попап без refresh()
+function _updatePopupAfterUpload(placeId, newPhotos) {
+  if (!newPhotos.length) return;
+
+  var popup = document.querySelector(".maplibregl-popup-content .mm-popup");
+  if (!popup) return;
+
+  // Ищем или создаём контейнер для фото
+  var photosContainer = popup.querySelector("div[style*='flex-wrap']");
+  if (!photosContainer) {
+    photosContainer = document.createElement("div");
+    photosContainer.style.cssText = "margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;";
+    // Вставляем после кнопки «Добавить фото» или перед кнопкой комментариев
+    var addBtnEl = popup.querySelector(".mm-add-photo-btn");
+    if (addBtnEl && addBtnEl.parentElement) {
+      addBtnEl.parentElement.after(photosContainer);
+    } else {
+      var commentsBtn = popup.querySelector(".mm-comments-btn");
+      if (commentsBtn) {
+        popup.insertBefore(photosContainer, commentsBtn);
+      } else {
+        popup.appendChild(photosContainer);
+      }
+    }
+  }
+
+  // Добавляем новые миниатюры (через DOM API — без innerHTML, без XSS-рисков)
+  for (var i = 0; i < newPhotos.length; i++) {
+    var ph = newPhotos[i];
+    var imgEl = document.createElement("img");
+    imgEl.src = ph.url;
+    imgEl.setAttribute("data-full", ph.url);
+    imgEl.className = "mm-photo-thumb";
+    imgEl.style.cssText = "width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;";
+
+    var delBtn = document.createElement("button");
+    delBtn.className = "mm-del-media-btn";
+    delBtn.setAttribute("data-media-id", String(ph.id));
+    delBtn.title = "Удалить";
+    delBtn.style.cssText = "position:absolute;top:2px;right:2px;border:none;background:rgba(0,0,0,0.55);color:#fff;border-radius:9999px;width:18px;height:18px;cursor:pointer;";
+    delBtn.textContent = "\u00d7";
+
+    var div = document.createElement("div");
+    div.style.cssText = "position:relative;width:60px;height:60px;";
+    div.appendChild(imgEl);
+    div.appendChild(delBtn);
+    photosContainer.appendChild(div);
+  }
+
+  // Обновляем кнопку «Добавить фото»
+  var addBtn = popup.querySelector(".mm-add-photo-btn");
+  if (addBtn) {
+    var have = Number(addBtn.getAttribute("data-have") || "0") + newPhotos.length;
+    addBtn.setAttribute("data-have", String(have));
+    if (have >= 12 && addBtn.parentElement) {
+      addBtn.parentElement.style.display = "none";
+    }
+  }
+}
 
 // ========= Модерация (admin / moderator) =========
 
@@ -2790,18 +3077,18 @@ async function loadModerationQueue() {
     list.innerHTML = items.map(p => {
       const title = (p.title || "").trim() || `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
       const author = p.user_login || p.username || "Аноним";
-      const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
       // Обрезаем описание до 100 символов для превью
       const notePreview = p.note && p.note.length > 100
         ? p.note.slice(0, 100) + "..."
         : p.note || "";
 
-      // Превью фотографий (до 3 шт.)
+      // Превью фотографий
       const photos = (p.media || []).map(m =>
-        `<img src="${esc(m.url)}" alt="фото"
-          style="width:60px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;"
-          onclick="window.open('${esc(m.url)}','_blank')" />`
+        `<img src="${esc(m.url)}" data-full="${esc(m.url)}" alt="фото"
+          class="mm-photo-thumb"
+          style="width:60px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;" />`
       ).join("");
       const photosHtml = photos
         ? `<div style="display:flex;gap:4px;margin-top:4px;">${photos}</div>`

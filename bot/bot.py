@@ -316,7 +316,7 @@ async def set_title(m: types.Message, state: FSMContext):
     r = requests.patch(
         f"{API_BASE}/v1/bot/places/{pid}",
         headers={"X-Bot-Secret": BOT_API_SECRET},
-        json={"title": m.text},
+        json={"title": m.text, "tg_id": m.from_user.id},
         timeout=10,
     )
     if not r.ok:
@@ -339,7 +339,7 @@ async def set_note(m: types.Message, state: FSMContext):
     r = requests.patch(
         f"{API_BASE}/v1/bot/places/{pid}",
         headers={"X-Bot-Secret": BOT_API_SECRET},
-        json={"note": m.text},
+        json={"note": m.text, "tg_id": m.from_user.id},
         timeout=10,
     )
     if not r.ok:
@@ -400,7 +400,7 @@ async def add_photo(m: types.Message, state: FSMContext):
     link = requests.post(
         f"{API_BASE}/v1/bot/places/{pid}/media",
         headers={"X-Bot-Secret": BOT_API_SECRET},
-        json={"temp_key": temp_key},
+        json={"temp_key": temp_key, "tg_id": m.from_user.id},
         timeout=10,
     )
     if not link.ok:

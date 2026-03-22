@@ -1,12 +1,46 @@
+import logging
 import os
+import re
 from urllib.parse import urlparse, urlunparse
 
 import boto3
 from botocore.exceptions import ClientError
+from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 BUCKET = os.getenv("S3_BUCKET", "memorymap-media")
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
 S3_PUBLIC_ENDPOINT = os.getenv("S3_PUBLIC_ENDPOINT")
+
+# Формат temp_key: uploads/{user_id}/{uuid}.{ext}
+_UPLOAD_KEY_RE = re.compile(r"^uploads/(\d+)/[0-9a-f\-]{36}\.\w{1,5}$")
+
+# Маппинг расширения → MIME-тип
+_EXT_TO_MIME = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
+
+
+def validate_temp_key(key: str, user_id: int | None = None) -> None:
+    """Проверяет формат temp_key: uploads/{user_id}/{uuid}.{ext}.
+    Защита от path traversal, S3 key injection и использования чужих ключей."""
+    m = _UPLOAD_KEY_RE.match(key)
+    if not m:
+        raise HTTPException(status_code=400, detail="invalid_temp_key")
+    if user_id is not None and m.group(1) != str(user_id):
+        raise HTTPException(status_code=403, detail="temp_key_owner_mismatch")
+
+
+def detect_mime(key: str) -> str:
+    """Определяет MIME-тип по расширению файла в S3-ключе."""
+    ext = key.rsplit(".", 1)[-1].lower() if "." in key else ""
+    return _EXT_TO_MIME.get(ext, "image/jpeg")
+
 
 def s3_client():
     return boto3.client(
@@ -25,7 +59,7 @@ def ensure_bucket(s3):
         try:
             s3.create_bucket(Bucket=BUCKET)
         except ClientError:
-            pass
+            logger.warning("Не удалось создать bucket %s", BUCKET, exc_info=True)
 
 def _apply_public_endpoint(url: str) -> str:
     """Меняем host в presigned-URL на тот, что доступен браузеру."""
@@ -74,7 +108,10 @@ def move_to_place_folder(old_key: str, place_id: int) -> str:
     # копируем
     s3.copy_object(Bucket=BUCKET, CopySource=copy_source, Key=new_key)
     # удаляем старый объект
-    s3.delete_object(Bucket=BUCKET, Key=old_key)
+    try:
+        s3.delete_object(Bucket=BUCKET, Key=old_key)
+    except Exception:
+        logger.warning("Не удалось удалить %s после копирования в %s", old_key, new_key)
 
     return new_key
 
