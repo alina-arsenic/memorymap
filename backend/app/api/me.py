@@ -4,7 +4,11 @@ from datetime import datetime, timedelta, timezone
 
 from app.api.auth import _generate_code, _validate_email
 from app.core.auth import get_current_user
-from app.core.config import EMAIL_CODE_TTL_MINUTES, JWT_EXPIRES_MINUTES, TELEGRAM_LINK_CODE_TTL_MINUTES
+from app.core.config import (
+    EMAIL_CODE_TTL_MINUTES,
+    JWT_EXPIRES_MINUTES,
+    TELEGRAM_LINK_CODE_TTL_MINUTES,
+)
 from app.core.deps import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password, verify_password
