@@ -51,6 +51,13 @@ def get_current_user(
     if not user:
         return None
 
+    # проверяем что токен выпущен после последней инвалидации
+    # iat в JWT — целые секунды, tokens_valid_after — с микросекундами,
+    # приводим обе стороны к int для корректного сравнения
+    iat = payload.get("iat", 0)
+    if user.tokens_valid_after and iat < int(user.tokens_valid_after.timestamp()):
+        return None
+
     db.refresh(user)
     db.expunge(user)
     return user

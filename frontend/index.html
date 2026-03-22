@@ -36,7 +36,8 @@
             <input id="login-input" class="input" />
 
             <div class="field-label" style="margin-top: 6px">Пароль</div>
-            <input id="login-password-input" type="password" class="input" />
+            <input id="login-password-input" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiLogin();}" />
 
             <div style="margin-top: 6px; text-align: right">
               <button class="btn btn-primary" onclick="uiLogin()">Войти</button>
@@ -52,18 +53,23 @@
                 >Зарегистрироваться</a
               >
             </div>
+            <div class="hint" style="margin-top: 4px; text-align: right">
+              <a href="#" onclick="showForgotPasswordForm(); return false;">Забыли пароль?</a>
+            </div>
           </div>
 
           <!-- ФОРМА РЕГИСТРАЦИИ (скрыта по умолчанию) -->
           <div id="register-form" style="display: none">
             <div class="field-label">Логин</div>
             <input id="reg-login-input" class="input" />
+            <div class="hint" style="font-size: 11px; color: #9ca3af; margin-top: 2px;">3–64 символа: латиница, цифры, _ и -</div>
 
             <div class="field-label" style="margin-top: 6px">Email</div>
             <input id="reg-email-input" class="input" type="email" />
 
             <div class="field-label" style="margin-top: 6px">Пароль</div>
-            <input id="reg-password-input" type="password" class="input" />
+            <input id="reg-password-input" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiRegister();}" />
 
             <div style="margin-top: 6px; text-align: right">
               <button class="btn btn-primary" onclick="uiRegister()">Зарегистрироваться</button>
@@ -87,12 +93,45 @@
               Код подтверждения отправлен на <b id="verify-email-display"></b>
             </div>
             <div class="field-label">Код из письма</div>
-            <input id="verify-code-input" class="input" maxlength="6" placeholder="6 цифр" />
+            <input id="verify-code-input" class="input" maxlength="6" placeholder="6 цифр"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiVerifyEmail();}" />
             <div style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
               <button class="btn btn-primary" onclick="uiVerifyEmail()">Подтвердить</button>
               <button class="btn" onclick="uiResendCode()">Отправить повторно</button>
             </div>
             <div id="verify-status" class="hint" style="margin-top: 6px"></div>
+          </div>
+
+          <!-- ФОРМА ЗАБЫЛ ПАРОЛЬ — ввод email (скрыта) -->
+          <div id="forgot-email-form" style="display: none">
+            <div class="hint" style="margin-bottom: 6px">
+              Введите email, указанный при регистрации. Мы отправим код для сброса пароля.
+            </div>
+            <div class="field-label">Email</div>
+            <input id="forgot-email-input" class="input" type="email"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiForgotPassword();}" />
+            <div style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+              <button class="btn btn-primary" onclick="uiForgotPassword()">Отправить код</button>
+              <button class="btn" onclick="showLoginForm()">Назад</button>
+            </div>
+            <div id="forgot-email-status" class="hint" style="margin-top: 6px"></div>
+          </div>
+
+          <!-- ФОРМА ЗАБЫЛ ПАРОЛЬ — ввод кода + нового пароля (скрыта) -->
+          <div id="forgot-reset-form" style="display: none">
+            <div class="hint" style="margin-bottom: 6px">
+              Код отправлен на <b id="forgot-reset-email-display"></b>
+            </div>
+            <div class="field-label">Код из письма</div>
+            <input id="forgot-reset-code-input" class="input" maxlength="6" placeholder="6 цифр" />
+            <div class="field-label" style="margin-top: 6px">Новый пароль</div>
+            <input id="forgot-reset-password-input" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiResetPassword();}" />
+            <div style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
+              <button class="btn btn-primary" onclick="uiResetPassword()">Сбросить пароль</button>
+              <button class="btn" onclick="showLoginForm()">Назад</button>
+            </div>
+            <div id="forgot-reset-status" class="hint" style="margin-top: 6px"></div>
           </div>
 
           <!-- КНОПКА ВЫХОДА (видна только когда вошли) -->
@@ -165,6 +204,7 @@
                 placeholder="login / username / tg_id"
                 onkeydown="
                   if (event.key === 'Enter') {
+                    event.preventDefault();
                     uiSearchUsers();
                   }
                 "
@@ -253,8 +293,11 @@
             <button class="btn" style="margin-top: 6px" onclick="loadAdminUsers()">Обновить</button>
           </div>
 
-          <!-- УДАЛЕНИЕ АККАУНТА (в самом низу сайдбара) -->
-          <div class="card" id="delete-account-btn" style="display: none">
+          <!-- ДЕЙСТВИЯ С АККАУНТОМ (в самом низу сайдбара) -->
+          <div class="card" id="account-actions" style="display: none">
+            <button class="btn" onclick="openAccountSettingsModal()" style="width: 100%; margin-bottom: 6px">
+              Настройки аккаунта
+            </button>
             <button class="btn btn-danger" onclick="openDeleteAccountModal()" style="width: 100%">
               Удалить аккаунт
             </button>
@@ -463,5 +506,89 @@
         </div>
       </div>
     </div>
+    <!-- MODAL: Настройки аккаунта -->
+    <div
+      id="account-settings-overlay"
+      class="modal-overlay"
+      style="display: none"
+      onclick="closeAccountSettingsModalOnOverlay(event)"
+    >
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div class="modal-title">Настройки аккаунта</div>
+          <button class="icon-btn" onclick="closeAccountSettingsModal()" title="Закрыть">✕</button>
+        </div>
+        <div class="modal-body">
+
+          <!-- Секция: Логин -->
+          <div class="settings-section">
+            <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+              onclick="toggleSettingsSection('login')">
+              <div class="field-label" style="margin-bottom:0;">Логин</div>
+              <span class="settings-toggle" id="settings-toggle-login">▸</span>
+            </div>
+            <div id="settings-body-login" style="display:none;margin-top:8px;">
+              <div class="hint" style="margin-bottom:6px;">Текущий логин: <b id="settings-current-login"></b></div>
+              <div class="field-label">Новый логин</div>
+              <input id="settings-new-login" class="input"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();uiChangeLogin();}" />
+              <div class="hint" style="font-size:11px;color:#9ca3af;margin-top:2px;">3–64 символа: латиница, цифры, _ и -</div>
+              <button class="btn btn-primary" style="margin-top:6px;" onclick="uiChangeLogin()">Сохранить</button>
+              <div id="settings-login-status" class="hint" style="margin-top:6px;"></div>
+            </div>
+          </div>
+
+          <div class="divider" style="margin:10px 0;"></div>
+
+          <!-- Секция: Email -->
+          <div class="settings-section">
+            <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+              onclick="toggleSettingsSection('email')">
+              <div class="field-label" style="margin-bottom:0;">Email</div>
+              <span class="settings-toggle" id="settings-toggle-email">▸</span>
+            </div>
+            <div id="settings-body-email" style="display:none;margin-top:8px;">
+              <div class="hint" style="margin-bottom:6px;">Текущий email: <b id="settings-current-email"></b></div>
+              <div id="settings-email-step1">
+                <div class="field-label">Новый email</div>
+                <input id="settings-new-email" class="input" type="email"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();uiChangeEmailStart();}" />
+                <button class="btn btn-primary" style="margin-top:6px;" onclick="uiChangeEmailStart()">Отправить код</button>
+              </div>
+              <div id="settings-email-step2" style="display:none;">
+                <div class="hint" style="margin-bottom:6px;">Код отправлен на <b id="settings-email-target"></b></div>
+                <div class="field-label">Код из письма</div>
+                <input id="settings-email-code" class="input" maxlength="6" placeholder="6 цифр"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();uiChangeEmailConfirm();}" />
+                <button class="btn btn-primary" style="margin-top:6px;" onclick="uiChangeEmailConfirm()">Подтвердить</button>
+              </div>
+              <div id="settings-email-status" class="hint" style="margin-top:6px;"></div>
+            </div>
+          </div>
+
+          <div class="divider" style="margin:10px 0;"></div>
+
+          <!-- Секция: Пароль -->
+          <div class="settings-section">
+            <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+              onclick="toggleSettingsSection('password')">
+              <div class="field-label" style="margin-bottom:0;">Пароль</div>
+              <span class="settings-toggle" id="settings-toggle-password">▸</span>
+            </div>
+            <div id="settings-body-password" style="display:none;margin-top:8px;">
+              <div class="field-label">Текущий пароль</div>
+              <input id="settings-old-password" type="password" class="input" />
+              <div class="field-label" style="margin-top:6px;">Новый пароль</div>
+              <input id="settings-new-password" type="password" class="input"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();uiChangePassword();}" />
+              <button class="btn btn-primary" style="margin-top:6px;" onclick="uiChangePassword()">Сменить пароль</button>
+              <div id="settings-password-status" class="hint" style="margin-top:6px;"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
   </body>
 </html>

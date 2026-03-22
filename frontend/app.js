@@ -60,45 +60,51 @@ wrapper.innerHTML = svg.trim();
 return wrapper.firstChild; // сам <svg>
 }
 
+/** Скрыть все гостевые формы */
+function _hideAllGuestForms() {
+  const ids = ["login-form", "register-form", "verify-form", "forgot-email-form", "forgot-reset-form"];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  }
+}
+
 /** Переключиться на форму входа */
 function showLoginForm() {
+  _hideAllGuestForms();
   const login = document.getElementById("login-form");
-  const reg = document.getElementById("register-form");
-  const verify = document.getElementById("verify-form");
   if (login) login.style.display = "";
-  if (reg) reg.style.display = "none";
-  if (verify) verify.style.display = "none";
 }
 
 /** Переключиться на форму регистрации */
 function showRegisterForm() {
-  const login = document.getElementById("login-form");
+  _hideAllGuestForms();
   const reg = document.getElementById("register-form");
-  const verify = document.getElementById("verify-form");
-  if (login) login.style.display = "none";
   if (reg) reg.style.display = "";
-  if (verify) verify.style.display = "none";
+}
+
+/** Переключиться на форму «Забыли пароль?» */
+function showForgotPasswordForm() {
+  _hideAllGuestForms();
+  const form = document.getElementById("forgot-email-form");
+  if (form) form.style.display = "";
+  const status = document.getElementById("forgot-email-status");
+  if (status) status.innerText = "";
 }
 
 function applyAuthUI(isAuthed) {
-  const loginForm = document.getElementById("login-form");
-  const registerForm = document.getElementById("register-form");
-  const verifyForm = document.getElementById("verify-form");
   const logoutBtn = document.getElementById("logout-btn");
   const authedOnly = document.getElementById("authed-only");
 
   if (isAuthed) {
-    if (loginForm) loginForm.style.display = "none";
-    if (registerForm) registerForm.style.display = "none";
-    if (verifyForm) verifyForm.style.display = "none";
+    _hideAllGuestForms();
   } else {
     showLoginForm();
   }
-  const deleteBtn = document.getElementById("delete-account-btn");
+  const accountActions = document.getElementById("account-actions");
   if (logoutBtn) logoutBtn.style.display = isAuthed ? "" : "none";
-  if (deleteBtn) deleteBtn.style.display = isAuthed ? "" : "none";
+  if (accountActions) accountActions.style.display = isAuthed ? "" : "none";
   if (authedOnly) authedOnly.style.display = isAuthed ? "" : "none";
-
 
   const notifBtn = document.getElementById("notif-btn");
   const notifBadge = document.getElementById("notif-badge");
@@ -106,11 +112,13 @@ function applyAuthUI(isAuthed) {
   if (!isAuthed) {
     if (notifBadge) { notifBadge.innerText = "0"; notifBadge.style.display = "none"; }
     closeFriendRequestsModal(true);
+
+    // закрываем модал настроек при logout
+    const settingsOverlay = document.getElementById("account-settings-overlay");
+    if (settingsOverlay) settingsOverlay.style.display = "none";
   }
 
-
   const tgStatus = document.getElementById("tg-status");
-
   if (!isAuthed) {
     if (tgStatus) tgStatus.innerText = "";
   }
@@ -263,136 +271,478 @@ async function loadMe() {
 }
 
 async function uiLogin() {
-  const login = (document.getElementById("login-input").value || "").trim();
-  const password = document.getElementById("login-password-input").value || "";
+  const btn = document.querySelector("#login-form .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const login = (document.getElementById("login-input").value || "").trim();
+    const password = document.getElementById("login-password-input").value || "";
+    if (!login || !password) { alert("Введите логин и пароль."); return; }
 
-  if (!login || !password) {
-    alert("Введите логин и пароль.");
-    return;
-  }
-
-  const resp = await fetch(`${API_BASE}/v1/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login, password }),
-  });
-
-  if (!resp.ok) {
-    const errData = await resp.json().catch(() => ({}));
-    if (resp.status === 403 && errData.detail === "email_not_verified") {
-      alert("Email не подтверждён. Проверьте почту или зарегистрируйтесь заново.");
-    } else {
-      alert("Неверный логин или пароль.");
+    const resp = await fetch(`${API_BASE}/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, password }),
+    });
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      if (resp.status === 403 && errData.detail === "email_not_verified") {
+        _pendingVerifyEmail = errData.email || null;
+        if (_pendingVerifyEmail) {
+          document.getElementById("login-form").style.display = "none";
+          document.getElementById("verify-form").style.display = "";
+          document.getElementById("verify-email-display").innerText = _pendingVerifyEmail;
+          document.getElementById("verify-status").innerText =
+            errData.email_sent === false
+              ? "Не удалось отправить код. Нажмите «Отправить повторно»."
+              : "Код подтверждения отправлен на вашу почту.";
+        } else {
+          alert("Email не подтверждён. Попробуйте войти ещё раз.");
+        }
+      } else if (resp.status === 400 && errData.detail === "password_too_long") {
+        alert("Пароль слишком длинный (макс. 128 символов).");
+      } else {
+        alert("Неверный логин или пароль.");
+      }
+      return;
     }
-    return;
+    const data = await resp.json();
+    accessToken = data.access_token;
+    localStorage.setItem(LS_TOKEN, accessToken);
+    await loadMe();
+    refresh();
+  } catch (e) {
+    alert("Ошибка сети. Попробуйте ещё раз.");
+  } finally {
+    btn.disabled = false;
   }
-
-  const data = await resp.json();
-  accessToken = data.access_token;
-  localStorage.setItem(LS_TOKEN, accessToken);
-
-  await loadMe();
-  refresh();
 }
 
 // email, на который отправлен код (запоминаем для verify/resend)
 let _pendingVerifyEmail = null;
+// email для формы сброса пароля
+let _pendingResetEmail = null;
+// email для формы смены email
+let _pendingNewEmail = null;
 
 async function uiRegister() {
-  const login = (document.getElementById("reg-login-input").value || "").trim();
-  const email = (document.getElementById("reg-email-input").value || "").trim();
-  const password = document.getElementById("reg-password-input").value || "";
+  const btn = document.querySelector("#register-form .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const login = (document.getElementById("reg-login-input").value || "").trim();
+    const email = (document.getElementById("reg-email-input").value || "").trim();
+    const password = document.getElementById("reg-password-input").value || "";
+    if (!login || !password || !email) { alert("Заполните логин, email и пароль."); return; }
+    if (login.length < 3 || login.length > 64) { alert("Логин должен быть от 3 до 64 символов."); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(login)) { alert("Логин может содержать только латиницу, цифры, _ и -"); return; }
+    if (password.length < 8) { alert("Пароль должен быть не короче 8 символов."); return; }
+    if (password.length > 128) { alert("Пароль не должен превышать 128 символов."); return; }
 
-  if (!login || !password || !email) {
-    alert("Заполните логин, email и пароль.");
-    return;
-  }
-
-  if (password.length < 8) {
-    alert("Пароль должен быть не короче 8 символов.");
-    return;
-  }
-
-  const resp = await fetch(`${API_BASE}/v1/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ login, password, email }),
-  });
-
-  if (resp.status === 409) {
-    const data = await resp.json().catch(() => ({}));
-    if (data.detail === "email_taken") {
-      alert("Этот email уже зарегистрирован.");
-    } else {
-      alert("Логин занят.");
+    const resp = await fetch(`${API_BASE}/v1/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ login, password, email }),
+    });
+    if (resp.status === 409) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "email_taken") alert("Этот email уже зарегистрирован.");
+      else alert("Логин занят.");
+      return;
     }
-    return;
-  }
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    if (data.detail === "invalid_email") {
-      alert("Некорректный формат email.");
-    } else {
-      alert("Ошибка регистрации.");
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "invalid_email") alert("Некорректный формат email.");
+      else if (data.detail === "login_invalid_length") alert("Логин должен быть от 3 до 64 символов.");
+      else if (data.detail === "login_invalid_chars") alert("Логин может содержать только латиницу, цифры, _ и -");
+      else if (data.detail === "password_too_short") alert("Пароль должен быть не короче 8 символов.");
+      else if (data.detail === "password_too_long") alert("Пароль не должен превышать 128 символов.");
+      else alert("Ошибка регистрации.");
+      return;
     }
-    return;
+    const regData = await resp.json();
+    _pendingVerifyEmail = email;
+    document.getElementById("register-form").style.display = "none";
+    document.getElementById("verify-form").style.display = "";
+    document.getElementById("verify-email-display").innerText = email;
+    document.getElementById("verify-status").innerText =
+      regData.email_sent === false
+        ? "Не удалось отправить письмо. Нажмите «Отправить повторно»."
+        : "";
+  } catch (e) {
+    alert("Ошибка сети. Попробуйте ещё раз.");
+  } finally {
+    btn.disabled = false;
   }
-
-  // показываем форму подтверждения email
-  _pendingVerifyEmail = email;
-  document.getElementById("register-form").style.display = "none";
-  document.getElementById("verify-form").style.display = "";
-  document.getElementById("verify-email-display").innerText = email;
-  document.getElementById("verify-status").innerText = "";
 }
 
 async function uiVerifyEmail() {
-  const code = (document.getElementById("verify-code-input").value || "").trim();
-  const statusEl = document.getElementById("verify-status");
+  const btn = document.querySelector("#verify-form .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const code = (document.getElementById("verify-code-input").value || "").trim();
+    const statusEl = document.getElementById("verify-status");
+    if (!code || !_pendingVerifyEmail) { statusEl.innerText = "Введите код из письма."; return; }
 
-  if (!code || !_pendingVerifyEmail) {
-    statusEl.innerText = "Введите код из письма.";
-    return;
+    const resp = await fetch(`${API_BASE}/v1/auth/verify-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: _pendingVerifyEmail, code }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (data.detail === "wrong_code") statusEl.innerText = "Неверный код.";
+      else if (data.detail === "code_expired") statusEl.innerText = "Код истёк. Нажмите «Отправить повторно».";
+      else statusEl.innerText = "Ошибка подтверждения.";
+      return;
+    }
+    _pendingVerifyEmail = null;
+    document.getElementById("verify-form").style.display = "none";
+    document.getElementById("login-form").style.display = "";
+    document.getElementById("verify-code-input").value = "";
+    alert("Email подтверждён! Теперь войдите в аккаунт.");
+  } catch (e) {
+    document.getElementById("verify-status").innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
   }
-
-  const resp = await fetch(`${API_BASE}/v1/auth/verify-email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: _pendingVerifyEmail, code }),
-  });
-
-  const data = await resp.json().catch(() => ({}));
-
-  if (!resp.ok) {
-    if (data.detail === "wrong_code") statusEl.innerText = "Неверный код.";
-    else if (data.detail === "code_expired") statusEl.innerText = "Код истёк. Нажмите «Отправить повторно».";
-    else statusEl.innerText = "Ошибка подтверждения.";
-    return;
-  }
-
-  // email подтверждён — скрываем форму верификации, показываем логин
-  _pendingVerifyEmail = null;
-  document.getElementById("verify-form").style.display = "none";
-  document.getElementById("login-form").style.display = "";
-  document.getElementById("verify-code-input").value = "";
-
-  alert("Email подтверждён! Теперь войдите в аккаунт.");
 }
 
 async function uiResendCode() {
-  const statusEl = document.getElementById("verify-status");
-  if (!_pendingVerifyEmail) { statusEl.innerText = "Нет email."; return; }
+  const btn = document.querySelector("#verify-form .btn:not(.btn-primary)");
+  if (btn && btn.disabled) return;
+  if (btn) btn.disabled = true;
+  try {
+    const statusEl = document.getElementById("verify-status");
+    if (!_pendingVerifyEmail) { statusEl.innerText = "Нет email."; return; }
+    const resp = await fetch(`${API_BASE}/v1/auth/resend-code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: _pendingVerifyEmail }),
+    });
+    if (resp.ok) {
+      statusEl.innerText = "Новый код отправлен.";
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "email_send_failed") statusEl.innerText = "Не удалось отправить письмо. Попробуйте позже.";
+      else statusEl.innerText = "Не удалось отправить код.";
+    }
+  } catch (e) {
+    document.getElementById("verify-status").innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
-  const resp = await fetch(`${API_BASE}/v1/auth/resend-code`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: _pendingVerifyEmail }),
-  });
+// --- F2: Забыл пароль ---
 
-  if (resp.ok) {
-    statusEl.innerText = "Новый код отправлен.";
-  } else {
-    statusEl.innerText = "Не удалось отправить код.";
+async function uiForgotPassword() {
+  const btn = document.querySelector("#forgot-email-form .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const statusEl = document.getElementById("forgot-email-status");
+  try {
+    const email = (document.getElementById("forgot-email-input").value || "").trim();
+    if (!email) { statusEl.innerText = "Введите email."; return; }
+
+    const resp = await fetch(`${API_BASE}/v1/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "invalid_email") statusEl.innerText = "Некорректный формат email.";
+      else statusEl.innerText = "Ошибка. Попробуйте ещё раз.";
+      return;
+    }
+    // переключаемся на форму ввода кода
+    _pendingResetEmail = email;
+    _hideAllGuestForms();
+    const resetForm = document.getElementById("forgot-reset-form");
+    if (resetForm) resetForm.style.display = "";
+    document.getElementById("forgot-reset-email-display").innerText = email;
+    document.getElementById("forgot-reset-status").innerText = "";
+  } catch (e) {
+    statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function uiResetPassword() {
+  const btn = document.querySelector("#forgot-reset-form .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const statusEl = document.getElementById("forgot-reset-status");
+  try {
+    const code = (document.getElementById("forgot-reset-code-input").value || "").trim();
+    const newPassword = document.getElementById("forgot-reset-password-input").value || "";
+    if (!code) { statusEl.innerText = "Введите код из письма."; return; }
+    if (!newPassword) { statusEl.innerText = "Введите новый пароль."; return; }
+    if (newPassword.length < 8) { statusEl.innerText = "Пароль должен быть не короче 8 символов."; return; }
+    if (newPassword.length > 128) { statusEl.innerText = "Пароль не должен превышать 128 символов."; return; }
+
+    const resp = await fetch(`${API_BASE}/v1/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: _pendingResetEmail, code, new_password: newPassword }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "wrong_code") statusEl.innerText = "Неверный код.";
+      else if (data.detail === "code_expired") statusEl.innerText = "Код истёк. Запросите новый.";
+      else if (data.detail === "no_active_code") statusEl.innerText = "Нет активного кода. Запросите новый.";
+      else if (data.detail === "password_too_short") statusEl.innerText = "Пароль должен быть не короче 8 символов.";
+      else if (data.detail === "password_too_long") statusEl.innerText = "Пароль не должен превышать 128 символов.";
+      else statusEl.innerText = "Ошибка. Попробуйте ещё раз.";
+      return;
+    }
+    // успех — переключаемся на логин
+    _pendingResetEmail = null;
+    document.getElementById("forgot-reset-code-input").value = "";
+    document.getElementById("forgot-reset-password-input").value = "";
+    showLoginForm();
+    alert("Пароль успешно сброшен! Войдите с новым паролем.");
+  } catch (e) {
+    statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// --- Настройки аккаунта (модал) ---
+
+function openAccountSettingsModal() {
+  const overlay = document.getElementById("account-settings-overlay");
+  if (!overlay) return;
+  overlay.style.display = "flex";
+
+  // заполняем текущие данные
+  const loginEl = document.getElementById("settings-current-login");
+  const emailEl = document.getElementById("settings-current-email");
+  if (loginEl) loginEl.innerText = (currentUser && currentUser.login) || "—";
+  if (emailEl) emailEl.innerText = (currentUser && currentUser.email) || "не указан";
+
+  // сбрасываем все секции
+  for (const name of ["login", "email", "password"]) {
+    const body = document.getElementById("settings-body-" + name);
+    const toggle = document.getElementById("settings-toggle-" + name);
+    if (body) body.style.display = "none";
+    if (toggle) toggle.innerText = "▸";
+  }
+  // сбрасываем поля
+  const fields = ["settings-new-login", "settings-new-email", "settings-email-code",
+    "settings-old-password", "settings-new-password"];
+  for (const id of fields) {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  }
+  const statuses = ["settings-login-status", "settings-email-status", "settings-password-status"];
+  for (const id of statuses) {
+    const el = document.getElementById(id);
+    if (el) el.innerText = "";
+  }
+  // сбрасываем шаг email
+  const step1 = document.getElementById("settings-email-step1");
+  const step2 = document.getElementById("settings-email-step2");
+  if (step1) step1.style.display = "";
+  if (step2) step2.style.display = "none";
+  _pendingNewEmail = null;
+}
+
+function closeAccountSettingsModal() {
+  const overlay = document.getElementById("account-settings-overlay");
+  if (overlay) overlay.style.display = "none";
+}
+
+function closeAccountSettingsModalOnOverlay(e) {
+  if (e.target === e.currentTarget) closeAccountSettingsModal();
+}
+
+function toggleSettingsSection(name) {
+  const body = document.getElementById("settings-body-" + name);
+  const toggle = document.getElementById("settings-toggle-" + name);
+  if (!body) return;
+  const isOpen = body.style.display !== "none";
+  // сворачиваем все
+  for (const n of ["login", "email", "password"]) {
+    const b = document.getElementById("settings-body-" + n);
+    const t = document.getElementById("settings-toggle-" + n);
+    if (b) b.style.display = "none";
+    if (t) t.innerText = "▸";
+  }
+  // если была закрыта — открываем
+  if (!isOpen) {
+    body.style.display = "";
+    if (toggle) toggle.innerText = "▾";
+  }
+}
+
+// --- F4: Сменить логин ---
+
+async function uiChangeLogin() {
+  const btn = document.querySelector("#settings-body-login .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const statusEl = document.getElementById("settings-login-status");
+  try {
+    const newLogin = (document.getElementById("settings-new-login").value || "").trim();
+    if (!newLogin) { statusEl.innerText = "Введите новый логин."; return; }
+    if (newLogin.length < 3 || newLogin.length > 64) { statusEl.innerText = "Логин должен быть от 3 до 64 символов."; return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(newLogin)) { statusEl.innerText = "Логин может содержать только латиницу, цифры, _ и -"; return; }
+
+    const resp = await apiFetch("/v1/me/change-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_login: newLogin }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "login_same") statusEl.innerText = "Это ваш текущий логин.";
+      else if (data.detail === "login_taken") statusEl.innerText = "Этот логин уже занят.";
+      else if (data.detail === "login_invalid_length") statusEl.innerText = "Логин должен быть от 3 до 64 символов.";
+      else if (data.detail === "login_invalid_chars") statusEl.innerText = "Логин может содержать только латиницу, цифры, _ и -";
+      else statusEl.innerText = "Ошибка. Попробуйте ещё раз.";
+      return;
+    }
+    // обновляем UI без перезагрузки
+    currentUser.login = newLogin;
+    const userTitle = document.getElementById("user-title");
+    const roleBadge = currentUser.role === "admin" ? " (Админ)"
+      : currentUser.role === "moderator" ? " (Модератор)" : "";
+    if (userTitle) userTitle.innerText = `Привет, ${newLogin}!${roleBadge}`;
+    document.getElementById("settings-current-login").innerText = newLogin;
+    document.getElementById("settings-new-login").value = "";
+    statusEl.innerText = "Логин изменён.";
+  } catch (e) {
+    statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// --- F3: Сменить пароль ---
+
+async function uiChangePassword() {
+  const btn = document.querySelector("#settings-body-password .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const statusEl = document.getElementById("settings-password-status");
+  try {
+    const oldPw = document.getElementById("settings-old-password").value || "";
+    const newPw = document.getElementById("settings-new-password").value || "";
+    if (!oldPw) { statusEl.innerText = "Введите текущий пароль."; return; }
+    if (!newPw) { statusEl.innerText = "Введите новый пароль."; return; }
+    if (newPw.length < 8) { statusEl.innerText = "Пароль должен быть не короче 8 символов."; return; }
+    if (newPw.length > 128) { statusEl.innerText = "Пароль не должен превышать 128 символов."; return; }
+
+    const resp = await apiFetch("/v1/me/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "wrong_password") statusEl.innerText = "Неверный текущий пароль.";
+      else if (data.detail === "no_password_set") statusEl.innerText = "Пароль не установлен (аккаунт через Telegram).";
+      else if (data.detail === "password_too_short") statusEl.innerText = "Пароль должен быть не короче 8 символов.";
+      else if (data.detail === "password_too_long") statusEl.innerText = "Пароль не должен превышать 128 символов.";
+      else statusEl.innerText = "Ошибка. Попробуйте ещё раз.";
+      return;
+    }
+    // сохраняем новый токен (старые сессии инвалидированы, текущая — продолжает работать)
+    const data = await resp.json();
+    if (data.access_token) {
+      accessToken = data.access_token;
+      localStorage.setItem(LS_TOKEN, accessToken);
+    }
+    closeAccountSettingsModal();
+    alert("Пароль изменён.");
+  } catch (e) {
+    statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// --- F5: Сменить email ---
+
+async function uiChangeEmailStart() {
+  const btn = document.querySelector("#settings-email-step1 .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const statusEl = document.getElementById("settings-email-status");
+  try {
+    const newEmail = (document.getElementById("settings-new-email").value || "").trim();
+    if (!newEmail) { statusEl.innerText = "Введите новый email."; return; }
+
+    const resp = await apiFetch("/v1/me/change-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_email: newEmail }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "email_same") statusEl.innerText = "Это ваш текущий email.";
+      else if (data.detail === "email_taken") statusEl.innerText = "Этот email уже занят.";
+      else if (data.detail === "invalid_email") statusEl.innerText = "Некорректный формат email.";
+      else if (data.detail === "email_send_failed") statusEl.innerText = "Не удалось отправить письмо.";
+      else statusEl.innerText = "Ошибка. Попробуйте ещё раз.";
+      return;
+    }
+    // переключаемся на шаг 2
+    _pendingNewEmail = newEmail;
+    document.getElementById("settings-email-step1").style.display = "none";
+    document.getElementById("settings-email-step2").style.display = "";
+    document.getElementById("settings-email-target").innerText = newEmail;
+    statusEl.innerText = "";
+  } catch (e) {
+    statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function uiChangeEmailConfirm() {
+  const btn = document.querySelector("#settings-email-step2 .btn-primary");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const statusEl = document.getElementById("settings-email-status");
+  try {
+    const code = (document.getElementById("settings-email-code").value || "").trim();
+    if (!code) { statusEl.innerText = "Введите код из письма."; return; }
+
+    const resp = await apiFetch("/v1/me/confirm-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_email: _pendingNewEmail, code }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "wrong_code") statusEl.innerText = "Неверный код.";
+      else if (data.detail === "code_expired") statusEl.innerText = "Код истёк. Запросите новый.";
+      else if (data.detail === "no_active_code") statusEl.innerText = "Нет активного кода. Запросите новый.";
+      else if (data.detail === "email_taken") statusEl.innerText = "Этот email уже занят.";
+      else statusEl.innerText = "Ошибка. Попробуйте ещё раз.";
+      return;
+    }
+    // сохраняем новый токен (старые сессии инвалидированы, текущая — продолжает работать)
+    const data = await resp.json();
+    if (data.access_token) {
+      accessToken = data.access_token;
+      localStorage.setItem(LS_TOKEN, accessToken);
+    }
+    // обновляем email в UI
+    if (_pendingNewEmail && currentUser) currentUser.email = _pendingNewEmail;
+    _pendingNewEmail = null;
+    closeAccountSettingsModal();
+    alert("Email изменён.");
+  } catch (e) {
+    statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
   }
 }
 

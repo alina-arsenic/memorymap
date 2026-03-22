@@ -1,16 +1,17 @@
 """API: регистрация, подтверждение email, логин."""
 
-import random
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 
-from app.core.config import EMAIL_CODE_TTL_MINUTES
+from app.core.config import EMAIL_CODE_TTL_MINUTES, JWT_EXPIRES_MINUTES
 from app.core.deps import get_db
 from app.core.jwt import create_access_token
 from app.core.security import hash_password, verify_password
-from app.models.models import EmailVerificationCode, User
-from app.services.email import send_verification_email
+from app.models.models import EmailVerificationCode, PasswordResetCode, User
+from app.services.email import send_password_reset_email, send_verification_email
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ router = APIRouter()
 # ---------- Вспомогательные ----------
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_LOGIN_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _validate_email(raw: str) -> str:
@@ -30,8 +32,8 @@ def _validate_email(raw: str) -> str:
 
 
 def _generate_code() -> str:
-    """Генерация 6-значного цифрового кода."""
-    return f"{random.randint(0, 999999):06d}"
+    """Генерация 6-значного цифрового кода (криптостойкий)."""
+    return f"{secrets.randbelow(1000000):06d}"
 
 
 # ---------- Регистрация ----------
@@ -48,11 +50,17 @@ def register(req: RegisterReq, db: Session = Depends(get_db)):
     login = (req.login or "").strip()
     if not login:
         raise HTTPException(status_code=400, detail="empty_login")
+    if len(login) < 3 or len(login) > 64:
+        raise HTTPException(status_code=400, detail="login_invalid_length")
+    if not _LOGIN_RE.match(login):
+        raise HTTPException(status_code=400, detail="login_invalid_chars")
 
     # проверяем пароль
     password = req.password or ""
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="password_too_short")
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail="password_too_long")
 
     # валидация email
     email = _validate_email(req.email)
@@ -88,9 +96,9 @@ def register(req: RegisterReq, db: Session = Depends(get_db)):
     db.add(EmailVerificationCode(user_id=user.id, code=code, expires_at=expires_at))
     db.commit()
 
-    send_verification_email(email, code)
+    email_sent = send_verification_email(email, code)
 
-    return {"id": user.id, "email_verification_required": True}
+    return {"id": user.id, "email_verification_required": True, "email_sent": email_sent}
 
 
 # ---------- Подтверждение email ----------
@@ -164,7 +172,8 @@ def resend_code(req: ResendCodeReq, db: Session = Depends(get_db)):
     db.add(EmailVerificationCode(user_id=user.id, code=code, expires_at=expires_at))
     db.commit()
 
-    send_verification_email(email, code)
+    if not send_verification_email(email, code):
+        raise HTTPException(status_code=503, detail="email_send_failed")
 
     return {"status": "sent"}
 
@@ -178,6 +187,10 @@ class LoginReq(BaseModel):
 
 @router.post("/auth/login")
 def login(req: LoginReq, db: Session = Depends(get_db)):
+    # защита от DoS: bcrypt медленный на длинных строках
+    if len(req.password or "") > 128:
+        raise HTTPException(status_code=400, detail="password_too_long")
+
     user = db.query(User).filter(User.login == req.login).one_or_none()
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="bad_credentials")
@@ -187,7 +200,98 @@ def login(req: LoginReq, db: Session = Depends(get_db)):
 
     # email должен быть подтверждён
     if not user.email_verified:
-        raise HTTPException(status_code=403, detail="email_not_verified")
+        # авто-отправка нового кода подтверждения
+        code = _generate_code()
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=EMAIL_CODE_TTL_MINUTES)
+        db.add(EmailVerificationCode(user_id=user.id, code=code, expires_at=expires_at))
+        db.commit()
+        email_sent = send_verification_email(user.email, code)
+
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "email_not_verified",
+                "email": user.email,
+                "email_sent": email_sent,
+            },
+        )
 
     token = create_access_token(user.id)
-    return {"access_token": token, "token_type": "bearer", "expires_minutes": 30}
+    return {"access_token": token, "token_type": "bearer", "expires_minutes": JWT_EXPIRES_MINUTES}
+
+
+# ---------- Забыл пароль ----------
+
+class ForgotPasswordReq(BaseModel):
+    email: str
+
+
+@router.post("/auth/forgot-password")
+def forgot_password(req: ForgotPasswordReq, db: Session = Depends(get_db)):
+    email = _validate_email(req.email)
+
+    # антиперечисление: всегда возвращаем одинаковый ответ
+    user = db.query(User).filter(User.email == email, User.email_verified.is_(True)).one_or_none()
+    if not user:
+        return {"status": "sent"}
+
+    code = _generate_code()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=EMAIL_CODE_TTL_MINUTES)
+
+    db.add(PasswordResetCode(user_id=user.id, code=code, expires_at=expires_at))
+    db.commit()
+
+    send_password_reset_email(email, code)
+    return {"status": "sent"}
+
+
+# ---------- Сброс пароля ----------
+
+class ResetPasswordReq(BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+
+@router.post("/auth/reset-password")
+def reset_password(req: ResetPasswordReq, db: Session = Depends(get_db)):
+    email = _validate_email(req.email)
+
+    user = db.query(User).filter(User.email == email).one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="invalid_request")
+
+    # валидация пароля
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="password_too_short")
+    if len(req.new_password) > 128:
+        raise HTTPException(status_code=400, detail="password_too_long")
+
+    # ищем последний неиспользованный код
+    row = (
+        db.query(PasswordResetCode)
+        .filter(
+            PasswordResetCode.user_id == user.id,
+            PasswordResetCode.used_at.is_(None),
+        )
+        .order_by(PasswordResetCode.id.desc())
+        .first()
+    )
+
+    if not row:
+        raise HTTPException(status_code=400, detail="no_active_code")
+
+    now = datetime.now(timezone.utc)
+    if row.expires_at < now:
+        raise HTTPException(status_code=400, detail="code_expired")
+
+    if row.code != req.code.strip():
+        raise HTTPException(status_code=400, detail="wrong_code")
+
+    # сброс пароля
+    row.used_at = now
+    user.password_hash = hash_password(req.new_password)
+    user.tokens_valid_after = now  # инвалидируем все старые JWT
+    db.commit()
+
+    return {"status": "ok"}

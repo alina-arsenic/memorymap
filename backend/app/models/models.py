@@ -15,6 +15,7 @@ class User(Base):
     email = Column(Text, unique=True, nullable=True)
     email_verified = Column(Boolean, nullable=False, default=False)
     role = Column(Text, nullable=False, default="user")  # admin | moderator | user
+    tokens_valid_after = Column(DateTime(timezone=True), nullable=True)
 
     places = relationship("Place", back_populates="user")
 
@@ -67,6 +68,19 @@ class Friend(Base):
 class EmailVerificationCode(Base):
     """Одноразовый код подтверждения email (6 цифр, TTL из конфига)."""
     __tablename__ = "email_verification_codes"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    code = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User")
+
+
+class PasswordResetCode(Base):
+    """Одноразовый код сброса пароля (6 цифр, TTL из конфига)."""
+    __tablename__ = "password_reset_codes"
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
