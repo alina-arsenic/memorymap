@@ -2534,7 +2534,7 @@ async function refresh() {
       const commentsCount = p.comments_count || 0;
       const showComments = !p.group_is_personal;
       const commentsBtnHtml = showComments
-        ? `<button class="mm-comments-btn" onclick="openCommentsModal(${p.id}, ${p.user_id || 'null'})">Комментарии (${commentsCount})</button>`
+        ? `<button class="mm-comments-btn" onclick="openCommentsModal(${p.id}, ${p.user_id || 'null'})">${pluralRu(commentsCount, "Комментарий", "Комментария", "Комментариев")} (${commentsCount})</button>`
         : "";
 
       const popupHtml = `
@@ -3654,12 +3654,12 @@ async function submitComment() {
   const text = (input?.value || "").trim();
 
   if (!text) {
-    if (statusEl) statusEl.innerText = "Введите текст комментария.";
+    if (statusEl) { statusEl.innerText = "Введите текст комментария."; statusEl.style.color = "#b91c1c"; }
     return;
   }
 
   _commentSubmitting = true;
-  if (statusEl) statusEl.innerText = "Отправка...";
+  if (statusEl) { statusEl.innerText = "Отправка..."; statusEl.style.color = ""; }
 
   const payload = { text };
   if (_replyToParentId) payload.parent_id = _replyToParentId;
@@ -3683,8 +3683,9 @@ async function submitComment() {
         "no_access": "Нет доступа к этой группе.",
         "parent_not_found": "Родительский комментарий не найден.",
         "parent_wrong_place": "Родительский комментарий от другой точки.",
+        "user_blocked": "Комментирование недоступно.",
       };
-      if (statusEl) statusEl.innerText = messages[msg] || `Ошибка: ${msg}`;
+      if (statusEl) { statusEl.innerText = messages[msg] || `Ошибка: ${msg}`; statusEl.style.color = "#b91c1c"; }
       return;
     }
 
@@ -3692,7 +3693,7 @@ async function submitComment() {
     const newCommentId = result.comment?.id || null;
 
     if (input) input.value = "";
-    if (statusEl) statusEl.innerText = "";
+    if (statusEl) { statusEl.innerText = ""; statusEl.style.color = ""; }
 
     // Сбрасываем режим ответа
     cancelReply();
@@ -3704,7 +3705,7 @@ async function submitComment() {
     }
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.innerText = "Ошибка сети."; statusEl.style.color = "#b91c1c"; }
   } finally {
     _commentSubmitting = false;
   }
@@ -3751,7 +3752,7 @@ function updateCommentsCountInPopup(placeId) {
   if (!btn) return;
   const list = document.getElementById("comments-list");
   const count = list ? list.querySelectorAll(".comment-item").length : 0;
-  btn.textContent = `Комментарии (${count})`;
+  btn.textContent = `${pluralRu(count, "Комментарий", "Комментария", "Комментариев")} (${count})`;
 }
 
 function closeCommentsModal() {
@@ -3926,11 +3927,11 @@ async function submitReport() {
 
   // Для категории «Другое» комментарий обязателен
   if (category === "other" && !comment) {
-    if (statusEl) statusEl.innerText = "Для категории «Другое» укажите комментарий.";
+    if (statusEl) { statusEl.innerText = "Для категории «Другое» укажите комментарий."; statusEl.style.color = "#b91c1c"; }
     return;
   }
 
-  if (statusEl) statusEl.innerText = "Отправка...";
+  if (statusEl) { statusEl.innerText = "Отправка..."; statusEl.style.color = ""; }
 
   try {
     const resp = await apiFetch(`/v1/places/${_reportPlaceId}/report`, {
@@ -3950,7 +3951,7 @@ async function submitReport() {
         "place_not_approved": "Жалоба уже отправлена, точка на модерации.",
         "invalid_category": "Некорректная категория.",
       };
-      if (statusEl) statusEl.innerText = messages[msg] || `Ошибка: ${msg}`;
+      if (statusEl) { statusEl.innerText = messages[msg] || `Ошибка: ${msg}`; statusEl.style.color = "#b91c1c"; }
       return;
     }
 
@@ -3958,7 +3959,7 @@ async function submitReport() {
     refresh();
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.innerText = "Ошибка сети."; statusEl.style.color = "#b91c1c"; }
   }
 }
 

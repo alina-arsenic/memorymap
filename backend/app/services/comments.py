@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from app.models.models import Comment, Group, Place, User
+from app.services.blocks import BlockService
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
@@ -43,6 +44,11 @@ class CommentService:
                 ).fetchone()
                 if not row:
                     raise PermissionError("no_access")
+
+        # Блокировка: автор комментария ↔ владелец точки
+        if place.user_id and place.user_id != user.id:
+            if BlockService.is_either_blocked(db, user.id, place.user_id):
+                raise PermissionError("user_blocked")
 
         return place
 
