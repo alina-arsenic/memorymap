@@ -94,7 +94,7 @@ class GroupService:
         rows = db.execute(
             text(
                 """
-                SELECT u.id, u.login, u.username, u.tg_id, m.role
+                SELECT u.id, u.login, u.username, m.role
                 FROM membership m
                 JOIN users u ON u.id = m.user_id
                 WHERE m.group_id=:gid
@@ -104,7 +104,7 @@ class GroupService:
             {"gid": group_id},
         ).fetchall()
         members = [
-            {"id": r[0], "login": r[1], "username": r[2], "tg_id": r[3], "role": r[4]} for r in rows
+            {"id": r[0], "login": r[1], "username": r[2], "role": r[3]} for r in rows
         ]
         return {"id": g.id, "name": g.name, "visibility": g.visibility, "is_personal": getattr(g, "is_personal", False), "owner_id": getattr(g, "owner_id", None), "my_role": my_role, "members": members}
 

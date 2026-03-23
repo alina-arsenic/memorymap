@@ -232,7 +232,9 @@ async function loadMe() {
 
   // Telegram UI
   if (currentUser.tg_id) {
-    if (tgStatus) tgStatus.innerText = `Привязан Telegram ID: ${currentUser.tg_id}`;
+    if (tgStatus) tgStatus.innerText = currentUser.username
+      ? `Привязан Telegram: @${currentUser.username}`
+      : `Привязан Telegram ID: ${currentUser.tg_id}`;
     if (tgBtn) tgBtn.style.display = "none";
     if (tgHint) tgHint.style.display = "none";
     if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
@@ -750,6 +752,10 @@ function uiLogout() {
   accessToken = null;
   currentUser = null;
   localStorage.removeItem(LS_TOKEN);
+  _prevFriendsHtml = "";
+  _prevBlockedHtml = "";
+  _prevGroupLayersHtml = "";
+  _prevGroupSelectHtml = "";
 
   // вернуть верхнюю надпись
   const userTitle = document.getElementById("user-title");
@@ -900,25 +906,33 @@ function updateNotifBadge() {
   badge.style.display = n > 0 ? "" : "none";
 }
 
+// Сохранённые копии последнего сгенерированного HTML — сравниваем с ними,
+// а не с innerHTML, потому что пользовательские взаимодействия (открытие dropdown,
+// клик по checkbox) модифицируют DOM и innerHTML начинает отличаться от шаблона.
+let _prevFriendsHtml = "";
+let _prevBlockedHtml = "";
+let _prevGroupLayersHtml = "";
+let _prevGroupSelectHtml = "";
+
 function refreshFriendsUI() {
   const listEl = document.getElementById("friends-list");
   if (!listEl) return;
 
   const friends = (currentUser && Array.isArray(currentUser.friends)) ? currentUser.friends : [];
   if (friends.length === 0) {
-    listEl.innerHTML = `<div class="hint">Пока друзей нет.</div>`;
-    // Не return — ниже обновляем секцию заблокированных
+    const empty = `<div class="hint">Пока друзей нет.</div>`;
+    if (_prevFriendsHtml !== empty) {
+      listEl.innerHTML = empty;
+      _prevFriendsHtml = empty;
+    }
     refreshBlockedListUI();
     return;
   }
 
-  listEl.innerHTML = friends.map(u => {
+  const newHtml = friends.map(u => {
     const title = escapeHtml(u.login || u.username || `user#${u.id}`);
     const sub = escapeHtml(
-      [
-        u.username ? `@${u.username}` : null,
-        u.tg_id ? `tg:${u.tg_id}` : null,
-      ].filter(Boolean).join(" • ")
+      u.username ? `@${u.username}` : ""
     );
 
     const displayName = u.login || u.username || `user#${u.id}`;
@@ -933,14 +947,22 @@ function refreshFriendsUI() {
           <div class="mm-popup-menu">
             <button class="mm-popup-menu-btn" onclick="toggleFriendMenu(this, event)" title="Действия">⋮</button>
             <div class="mm-popup-dropdown">
-              <button class="mm-popup-dropdown-item" onclick="confirmRemoveFriend(${u.id}, '${escapedName}')">Удалить из друзей</button>
-              <button class="mm-popup-dropdown-item" onclick="confirmBlockUser(${u.id}, '${escapedName}')">Заблокировать</button>
+              <button class="mm-popup-dropdown-item" data-action="remove-friend" data-user-id="${u.id}" data-name="${escapedName}">Удалить из друзей</button>
+              <button class="mm-popup-dropdown-item" data-action="block-user" data-user-id="${u.id}" data-name="${escapedName}">Заблокировать</button>
             </div>
           </div>
         </div>
       </div>
     `;
   }).join("");
+
+  // Обновляем DOM только если данные изменились (убирает мерцание при периодическом обновлении).
+  // Сравниваем с _prevFriendsHtml, а не с innerHTML — пользователь может открыть dropdown
+  // (добавится класс .open), и innerHTML будет отличаться от шаблона.
+  if (_prevFriendsHtml !== newHtml) {
+    listEl.innerHTML = newHtml;
+    _prevFriendsHtml = newHtml;
+  }
 
   // Обновляем секцию заблокированных
   refreshBlockedListUI();
@@ -1018,7 +1040,11 @@ function renderGroupLayersUI() {
     );
   }
 
-  listEl.innerHTML = parts.join("");
+  const newHtml = parts.join("");
+  if (_prevGroupLayersHtml !== newHtml) {
+    listEl.innerHTML = newHtml;
+    _prevGroupLayersHtml = newHtml;
+  }
 }
 
 function toggleGroupLayer(groupId, isChecked) {
@@ -1049,10 +1075,14 @@ function populateAddGroupSelect() {
   }
 
   const current = Number(sel.value || 1);
-  sel.innerHTML = opts.map(o => `<option value="${o.id}">${escapeHtml(o.label)}</option>`).join("");
-  // keep selection if possible
-  const still = opts.find(o => o.id === current);
-  sel.value = String(still ? current : 1);
+  const newHtml = opts.map(o => `<option value="${o.id}">${escapeHtml(o.label)}</option>`).join("");
+  if (_prevGroupSelectHtml !== newHtml) {
+    _prevGroupSelectHtml = newHtml;
+    sel.innerHTML = newHtml;
+    // keep selection if possible
+    const still = opts.find(o => o.id === current);
+    sel.value = String(still ? current : 1);
+  }
 }
 
 // -------------------- LAYERS MODAL (groups UI) --------------------
@@ -1212,7 +1242,7 @@ async function openEditLayerModal(groupId) {
 
       const removeBtn = (!isOwner || isOwnerMember || isSelf)
         ? ``
-        : `<button class="btn btn-ghost btn-icon" title="Удалить" onclick="removeLayerMember(${groupId}, ${m.id}, '${label}')">✕</button>`;
+        : `<button class="btn btn-ghost btn-icon" title="Удалить" data-action="remove-member" data-group-id="${groupId}" data-user-id="${m.id}" data-name="${label}">✕</button>`;
 
       return `
         <div class="list-item" style="align-items:center;">
@@ -1631,12 +1661,15 @@ function refreshBlockedListUI() {
   const blocked = (currentUser && Array.isArray(currentUser.blocked_users)) ? currentUser.blocked_users : [];
   if (blocked.length === 0) {
     section.style.display = "none";
-    listEl.innerHTML = "";
+    if (_prevBlockedHtml !== "") {
+      listEl.innerHTML = "";
+      _prevBlockedHtml = "";
+    }
     return;
   }
 
   section.style.display = "";
-  listEl.innerHTML = blocked.map(u => {
+  const newHtml = blocked.map(u => {
     const title = escapeHtml(u.login || u.username || `user#${u.id}`);
     return `
       <div class="list-item">
@@ -1649,9 +1682,15 @@ function refreshBlockedListUI() {
       </div>
     `;
   }).join("");
+  if (_prevBlockedHtml !== newHtml) {
+    listEl.innerHTML = newHtml;
+    _prevBlockedHtml = newHtml;
+  }
 }
 
+let _searchingUsers = false;
 async function uiSearchUsers() {
+  if (_searchingUsers) return;
   if (!accessToken) { alert("Сначала войдите."); return; }
 
   const qEl = document.getElementById("friends-search-input");
@@ -1666,6 +1705,7 @@ async function uiSearchUsers() {
     return;
   }
 
+  _searchingUsers = true;
   if (statusEl) statusEl.innerText = "Ищу…";
   resEl.innerHTML = "";
 
@@ -1694,10 +1734,7 @@ async function uiSearchUsers() {
     resEl.innerHTML = filtered.map(u => {
       const title = escapeHtml(u.login || u.username || `user#${u.id}`);
       const sub = escapeHtml(
-        [
-          u.username ? `@${u.username}` : null,
-          u.tg_id ? `tg:${u.tg_id}` : null,
-        ].filter(Boolean).join(" • ")
+        u.username ? `@${u.username}` : ""
       );
 
       const alreadyFriend = friendIds.has(u.id);
@@ -1724,6 +1761,8 @@ async function uiSearchUsers() {
   } catch (e) {
     console.error(e);
     if (statusEl) statusEl.innerText = "Ошибка сети.";
+  } finally {
+    _searchingUsers = false;
   }
 }
 
@@ -1868,10 +1907,7 @@ async function loadFriendRequestsLists() {
           const from = r.from_user || {};
           const title = escapeHtml(from.login || from.username || `user#${from.id || "?"}`);
           const sub = escapeHtml(
-            [
-              from.username ? `@${from.username}` : null,
-              from.tg_id ? `tg:${from.tg_id}` : null,
-            ].filter(Boolean).join(" • ")
+            from.username ? `@${from.username}` : ""
           );
 
           const fromName = escapeHtml(from.login || from.username || `user#${from.id || "?"}`);
@@ -1887,7 +1923,7 @@ async function loadFriendRequestsLists() {
                 <div class="mm-popup-menu">
                   <button class="mm-popup-menu-btn" onclick="toggleFriendMenu(this, event)" title="Ещё">⋮</button>
                   <div class="mm-popup-dropdown">
-                    <button class="mm-popup-dropdown-item" onclick="declineAndBlockUser(${r.id}, ${from.id}, '${fromName}')">Заблокировать</button>
+                    <button class="mm-popup-dropdown-item" data-action="decline-block" data-request-id="${r.id}" data-user-id="${from.id}" data-name="${fromName}">Заблокировать</button>
                   </div>
                 </div>
               </div>
@@ -1912,10 +1948,7 @@ async function loadFriendRequestsLists() {
           const to = r.to_user || {};
           const title = escapeHtml(to.login || to.username || `user#${to.id || "?"}`);
           const sub = escapeHtml(
-            [
-              to.username ? `@${to.username}` : null,
-              to.tg_id ? `tg:${to.tg_id}` : null,
-            ].filter(Boolean).join(" • ")
+            to.username ? `@${to.username}` : ""
           );
 
           return `
@@ -3963,6 +3996,26 @@ async function submitReport() {
   }
 }
 
+// Делегированный обработчик для кнопок с data-action (защита от XSS в onclick)
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const name = btn.dataset.name || "";
+  const userId = btn.dataset.userId ? +btn.dataset.userId : null;
+
+  if (action === "remove-friend" && userId) confirmRemoveFriend(userId, name);
+  if (action === "block-user" && userId) confirmBlockUser(userId, name);
+  if (action === "decline-block") {
+    const requestId = btn.dataset.requestId ? +btn.dataset.requestId : null;
+    if (requestId && userId) declineAndBlockUser(requestId, userId, name);
+  }
+  if (action === "remove-member") {
+    const groupId = btn.dataset.groupId ? +btn.dataset.groupId : null;
+    if (groupId && userId) removeLayerMember(groupId, userId, name);
+  }
+});
+
 // Закрытие dropdown-меню по клику вне
 document.addEventListener("click", (e) => {
   document.querySelectorAll(".mm-popup-dropdown").forEach(dd => {
@@ -4105,15 +4158,8 @@ setInterval(async () => {
 }, 8000);
 
 function maybeRefreshSearchResults() {
-  const qEl = document.getElementById("friends-search-input");
-  const resEl = document.getElementById("friends-search-results");
-  if (!qEl || !resEl) return;
-  const q = (qEl.value || "").trim();
-  if (!q) return;
-  // Only refresh if the user has already run a search (i.e. results are shown)
-  if (resEl.innerHTML && resEl.innerHTML.trim().length > 0) {
-    uiSearchUsers();
-  }
+  // Не перезапускаем поиск автоматически — пользователь сам нажмёт «Найти».
+  // Автообновление вызывало мерцание результатов каждые 8 секунд.
 }
 
 map.on("load", refresh);

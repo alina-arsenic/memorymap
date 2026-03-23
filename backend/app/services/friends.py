@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from app.models.models import FriendRequest, Friendship, GroupInvite, User
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 
 def _pair(a: int, b: int) -> tuple[int, int]:
@@ -42,7 +46,7 @@ class FriendsService:
             .order_by(User.id.asc())
             .all()
         )
-        return [{"id": u.id, "tg_id": u.tg_id, "username": u.username, "login": u.login} for u in users]
+        return [{"id": u.id, "username": u.username, "login": u.login} for u in users]
 
     @staticmethod
     def inbox_count(db: Session, user: User) -> int:
@@ -207,8 +211,8 @@ class FriendsService:
                 "status": r.status,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "responded_at": r.responded_at.isoformat() if r.responded_at else None,
-                "from_user": {"id": fu.id, "login": fu.login, "username": fu.username, "tg_id": fu.tg_id} if fu else {"id": r.from_user_id},
-                "to_user": {"id": tu.id, "login": tu.login, "username": tu.username, "tg_id": tu.tg_id} if tu else {"id": r.to_user_id},
+                "from_user": {"id": fu.id, "login": fu.login, "username": fu.username} if fu else {"id": r.from_user_id},
+                "to_user": {"id": tu.id, "login": tu.login, "username": tu.username} if tu else {"id": r.to_user_id},
             })
         return items
 
@@ -249,8 +253,15 @@ class FriendsService:
             Friendship.user1_id == u1,
             Friendship.user2_id == u2
         ).one_or_none()
+        # SAVEPOINT: защита от race condition при concurrent accept
         if not exists:
-            db.add(Friendship(user1_id=u1, user2_id=u2, created_at=datetime.now(timezone.utc)))
+            try:
+                nested = db.begin_nested()
+                db.add(Friendship(user1_id=u1, user2_id=u2, created_at=datetime.now(timezone.utc)))
+                nested.commit()
+            except IntegrityError:
+                # Дружба уже создана другим потоком — продолжаем
+                logger.debug("Friendship %d↔%d already exists (concurrent accept)", u1, u2)
 
         req.status = "accepted"
         req.responded_at = datetime.now(timezone.utc)

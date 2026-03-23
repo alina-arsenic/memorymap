@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from app.models.models import User
 from app.services.friends import FriendsService
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 
@@ -15,15 +16,27 @@ class UserService:
         tg_id: Optional[int],
         username: Optional[str],
     ) -> Optional[int]:
-        # This function is used by the bot integration.
+        # Эта функция используется ботом для создания/поиска пользователя.
+        # Обработка race condition: два concurrent запроса с одним tg_id →
+        # IntegrityError на unique constraint → rollback + повторный SELECT.
         if tg_id:
             user = db.query(User).filter(User.tg_id == tg_id).one_or_none()
             if user:
                 return user.id
             user = User(tg_id=tg_id, username=username)
             db.add(user)
-            db.commit()
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                user = db.query(User).filter(User.tg_id == tg_id).one_or_none()
+                if user:
+                    return user.id
+                raise
             db.refresh(user)
+            # Создаём личную группу для нового бот-юзера
+            from app.services.groups import GroupService
+            GroupService.ensure_personal_group(db, user)
             return user.id
 
         if user_id:
@@ -32,8 +45,16 @@ class UserService:
                 return user_id
             user = User(username=username or f"auto_{uuid.uuid4().hex[:8]}")
             db.add(user)
-            db.commit()
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                # user_id ветка: auto-username без unique constraint,
+                # IntegrityError маловероятен, но для consistency обрабатываем
+                raise
             db.refresh(user)
+            from app.services.groups import GroupService
+            GroupService.ensure_personal_group(db, user)
             return user.id
 
         return None
@@ -44,6 +65,13 @@ class UserService:
         if not q:
             return []
 
+        # Если запрос начинается с @ — ищем только по Telegram username
+        tg_only = q.startswith("@")
+        if tg_only:
+            q = q[1:]
+        if not q:
+            return []
+
         # Собираем ID заблокированных (в обе стороны) для фильтрации
         exclude_ids: set = set()
         if current_user_id is not None:
@@ -51,20 +79,25 @@ class UserService:
             exclude_ids = BlockService.get_blocked_ids(db, current_user_id) | BlockService.get_blocked_by_ids(db, current_user_id)
 
         conditions = []
-        # string match
-        like = f"%{q}%"
-        conditions.append(User.login.ilike(like))
-        conditions.append(User.username.ilike(like))
-
-        # tg_id exact match if numeric
-        if q.isdigit():
-            conditions.append(User.tg_id == int(q))
+        # Экранируем SQL wildcard-символы в пользовательском вводе
+        escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped_q}%"
+        if tg_only:
+            # @ → только Telegram username
+            conditions.append(User.username.ilike(like, escape="\\"))
+        else:
+            conditions.append(User.login.ilike(like, escape="\\"))
+            conditions.append(User.username.ilike(like, escape="\\"))
 
         query = db.query(User).filter(or_(*conditions))
 
         # Исключаем заблокированных из результатов
         if exclude_ids:
             query = query.filter(~User.id.in_(exclude_ids))
+
+        # Исключаем текущего пользователя из результатов поиска
+        if current_user_id is not None:
+            query = query.filter(User.id != current_user_id)
 
         users = (
             query
@@ -74,7 +107,7 @@ class UserService:
         )
 
         return [
-            {"id": u.id, "tg_id": u.tg_id, "username": u.username, "login": u.login}
+            {"id": u.id, "username": u.username, "login": u.login}
             for u in users
         ]
 

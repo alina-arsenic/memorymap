@@ -123,7 +123,8 @@
               Код отправлен на <b id="forgot-reset-email-display"></b>
             </div>
             <div class="field-label">Код из письма</div>
-            <input id="forgot-reset-code-input" class="input" maxlength="6" placeholder="6 цифр" />
+            <input id="forgot-reset-code-input" class="input" maxlength="6" placeholder="6 цифр"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiResetPassword();}" />
             <div class="field-label" style="margin-top: 6px">Новый пароль</div>
             <input id="forgot-reset-password-input" type="password" class="input"
               onkeydown="if(event.key==='Enter'){event.preventDefault();uiResetPassword();}" />
@@ -201,7 +202,7 @@
               <input
                 id="friends-search-input"
                 class="input"
-                placeholder="login / username / tg_id"
+                placeholder="login / username"
                 onkeydown="
                   if (event.key === 'Enter') {
                     event.preventDefault();
