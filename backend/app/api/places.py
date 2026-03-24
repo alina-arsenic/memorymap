@@ -7,27 +7,27 @@ from app.models.models import Media, Place, User
 from app.services.places import PlaceService
 from app.storage import detect_mime, move_to_place_folder, validate_temp_key
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 router = APIRouter()
 
 class PlaceCreate(BaseModel):
     group_id: int
-    title: Optional[str] = None
-    note: Optional[str] = None
-    lat: float
-    lon: float
+    title: Optional[str] = Field(None, max_length=200)
+    note: Optional[str] = Field(None, max_length=5000)
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
     media_keys: List[str] = []
 
 class BotPlaceCreate(BaseModel):
     group_id: int
     tg_id: int
     username: Optional[str] = None
-    title: Optional[str] = None
-    note: Optional[str] = None
-    lat: float
-    lon: float
+    title: Optional[str] = Field(None, max_length=200)
+    note: Optional[str] = Field(None, max_length=5000)
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
     media_keys: List[str] = []
 
 @router.post("/places")
@@ -199,11 +199,15 @@ def update_place(
         if not title:
             # пусто, значит координаты
             title = f"{place.lat:.5f}, {place.lon:.5f}"
+        if len(title) > 200:
+            raise HTTPException(status_code=400, detail="title_too_long")
         place.title = title
 
     if "note" in payload:
         raw = payload["note"]
         raw = "" if raw is None else str(raw)
+        if len(raw) > 5000:
+            raise HTTPException(status_code=400, detail="note_too_long")
         place.note = raw  # note можно пустым
 
     db.commit()

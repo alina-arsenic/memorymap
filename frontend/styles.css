@@ -357,6 +357,7 @@ html, body {
 .mm-popup-title {
     font-weight: 600;
     margin-bottom: 6px;
+    overflow-wrap: anywhere;
 }
 
 .mm-popup-note {
@@ -821,6 +822,7 @@ html, body {
   font-size:13px;
   line-height:1.4;
   color:#111827;
+  overflow-wrap:anywhere;
 }
 .notif-time{
   font-size:11px;

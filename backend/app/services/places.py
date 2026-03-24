@@ -126,14 +126,20 @@ class PlaceService:
         # Фильтр модерации для публичных групп
         if group and group.visibility == "public":
             if current_user_role in ("admin", "moderator"):
-                # admin/moderator видят все точки, включая чужие pending
-                q = q.filter(Place.moderation_status.in_(["approved", "pending"]))
+                # admin/moderator видят все точки, включая чужие pending + свои rejected
+                q = q.filter(
+                    or_(
+                        Place.moderation_status.in_(["approved", "pending"]),
+                        (Place.user_id == current_user_id) & (Place.moderation_status == "rejected"),
+                    )
+                )
             elif current_user_id is not None:
-                # обычный пользователь — approved + свои pending
+                # обычный пользователь — approved + свои pending/rejected
                 q = q.filter(
                     or_(
                         Place.moderation_status == "approved",
                         (Place.user_id == current_user_id) & (Place.moderation_status == "pending"),
+                        (Place.user_id == current_user_id) & (Place.moderation_status == "rejected"),
                     )
                 )
             else:
@@ -169,7 +175,6 @@ class PlaceService:
                 "lat": place.lat,
                 "lon": place.lon,
                 "user_id": place.user_id,
-                "user_tg_id": user.tg_id if user else None,
                 "username": user.username if user else None,
                 "user_login": user.login if user else None,
                 "moderation_status": place.moderation_status,
@@ -255,6 +260,7 @@ class PlaceService:
                 or_(
                     Group.visibility != "public",
                     Place.moderation_status.in_(["approved", "pending"]),
+                    (Place.user_id == current_user_id) & (Place.moderation_status == "rejected"),
                 )
             )
         elif current_user_id is not None:
@@ -263,6 +269,7 @@ class PlaceService:
                     Group.visibility != "public",
                     Place.moderation_status == "approved",
                     (Place.user_id == current_user_id) & (Place.moderation_status == "pending"),
+                    (Place.user_id == current_user_id) & (Place.moderation_status == "rejected"),
                 )
             )
         else:
@@ -297,7 +304,6 @@ class PlaceService:
                     "lat": place.lat,
                     "lon": place.lon,
                     "user_id": place.user_id,
-                    "user_tg_id": user.tg_id if user else None,
                     "username": user.username if user else None,
                     "user_login": user.login if user else None,
                     "moderation_status": place.moderation_status,

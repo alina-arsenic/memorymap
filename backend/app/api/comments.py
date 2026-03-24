@@ -9,19 +9,19 @@ from app.models.models import Comment, User
 from app.services.comments import CommentService
 from app.services.notifications import NotificationService
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 router = APIRouter()
 
 
 class CommentRequest(BaseModel):
-    text: str
+    text: str = Field(..., min_length=1, max_length=1000)
     parent_id: Optional[int] = None
 
 
 class CommentEditRequest(BaseModel):
-    text: str
+    text: str = Field(..., min_length=1, max_length=1000)
 
 
 @router.post("/places/{place_id}/comments")

@@ -2101,6 +2101,7 @@ function escapeHtml(s) {
 }
 
 
+let _addingWebPoint = false;
 async function addWebPoint() {
 const statusEl = document.getElementById("web-add-status");
 
@@ -2118,18 +2119,7 @@ if (!accessToken) {
   return;
 }
 
-const titleInput = document.getElementById("web-title");
-const noteInput = document.getElementById("web-note");
-
-const titleRaw = titleInput ? titleInput.value : "";
-const note = noteInput ? noteInput.value.trim() : "";
 const files = _selectedFiles.slice(); // копия массива выбранных файлов
-
-let titleFinal = (titleRaw || "").trim();
-if (!titleFinal) {
-  titleFinal = `${tempCoords.lat.toFixed(5)}, ${tempCoords.lng.toFixed(5)}`;
-}
-
 if (files.length > 12) {
     if (statusEl) {
     statusEl.innerText = "Можно добавить не более 12 фотографий.";
@@ -2139,24 +2129,30 @@ if (files.length > 12) {
     return;
 }
 
+// Защита от двойного клика
+if (_addingWebPoint) return;
+_addingWebPoint = true;
+
+try {
+const titleInput = document.getElementById("web-title");
+const noteInput = document.getElementById("web-note");
+
+const titleRaw = titleInput ? titleInput.value : "";
+const note = noteInput ? noteInput.value.trim() : "";
+
+let titleFinal = (titleRaw || "").trim();
+if (!titleFinal) {
+  titleFinal = `${tempCoords.lat.toFixed(5)}, ${tempCoords.lng.toFixed(5)}`;
+}
+
 let mediaKeys = [];
 if (files.length > 0) {
-    try {
     if (statusEl) {
         statusEl.innerText = "Загрузка фотографий...";
         statusEl.style.color = "#52525b";
         statusEl.style.fontWeight = "400";
     }
     mediaKeys = await uploadPhotos(files);
-    } catch (e) {
-    console.error(e);
-    if (statusEl) {
-        statusEl.innerText = "Ошибка при загрузке фотографий.";
-        statusEl.style.color = "#b91c1c";
-        statusEl.style.fontWeight = "600";
-    }
-    return;
-    }
 }
 
 const groupSelect = document.getElementById("web-group");
@@ -2171,7 +2167,6 @@ const body = {
   media_keys: mediaKeys,
 };
 
-try {
     const resp = await apiFetch("/v1/places", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2217,6 +2212,8 @@ try {
     if (statusEl) {
     statusEl.innerText = "Ошибка соединения с API при добавлении точки.";
     }
+} finally {
+    _addingWebPoint = false;
 }
 }
 
@@ -2334,7 +2331,11 @@ map.on("contextmenu", (e) => {
 });
 
 function clearMarkers() {
-currentMarkers.forEach(m => m.remove());
+currentMarkers.forEach(m => {
+    const popup = m.getPopup();
+    if (popup) popup.remove();
+    m.remove();
+});
 currentMarkers = [];
 markersByPlaceId = {};
 }
@@ -2380,7 +2381,9 @@ if (status) {
 }
 }
 
+let _refreshSeq = 0; // sequence counter для отбрасывания устаревших ответов
 async function refresh() {
+  const seq = ++_refreshSeq;
   const showPublic = document.getElementById("layer-public").checked;
   const showMy = document.getElementById("layer-my").checked;
 
@@ -2418,6 +2421,7 @@ async function refresh() {
       return;
     }
     const d = await r.json().catch(() => ({}));
+    if (seq !== _refreshSeq) return; // устаревший ответ — игнорируем
     allItems = d.items || [];
   } catch (e) {
     console.error(e);
@@ -2456,9 +2460,10 @@ async function refresh() {
   clearMarkers();
 
   filtered.forEach(p => {
-      // серый пин для точек на модерации, зелёный для своих, синий для чужих
+      // серый пин для точек на модерации/отклонённых, зелёный для своих, синий для чужих
       const isPending = p.moderation_status === "pending";
-      const pinColor = isPending ? "#9ca3af" : undefined;
+      const isRejected = p.moderation_status === "rejected";
+      const pinColor = (isPending || isRejected) ? "#9ca3af" : undefined;
       const el = createPin(p.isMine, pinColor);
 
       const who = p.isMine
@@ -2474,6 +2479,8 @@ async function refresh() {
       let pendingBadge = "";
       if (isPending) {
         pendingBadge = `<div class="mm-report-badge mm-report-badge--pending">На модерации</div>`;
+      } else if (isRejected && p.isMine) {
+        pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Отклонено модератором</div>`;
       } else if (p.isMine && p.has_report) {
         pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Поступила жалоба</div>`;
       }
@@ -2575,7 +2582,7 @@ async function refresh() {
             ${reportMenuHtml}
           </div>
           ${noteBlock}
-          <div style="margin-top:6px;font-size:11px;color:#6b7280;">${who}</div>
+          <div style="margin-top:6px;font-size:11px;color:#6b7280;overflow-wrap:anywhere;">${esc(who)}</div>
           ${pendingBadge}
           ${moderationBtns}
           ${addBtnHtml}
@@ -2693,7 +2700,15 @@ document.addEventListener("click", async (e) => {
     body: JSON.stringify(payload),
   });
 
-  if (!resp.ok) { alert("Не удалось сохранить (код " + resp.status + ")"); return; }
+  if (!resp.ok) {
+    const errData = await resp.json().catch(() => ({}));
+    const detail = errData.detail || "";
+    let msg = "Не удалось сохранить (код " + resp.status + ")";
+    if (detail === "title_too_long") msg = "Название слишком длинное (максимум 200 символов)";
+    else if (detail === "note_too_long") msg = "Заметка слишком длинная (максимум 5000 символов)";
+    alert(msg);
+    return;
+  }
 
   refresh();
 });
@@ -3140,9 +3155,9 @@ async function loadModerationQueue() {
 
       return `
         <div style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
-          <div style="font-weight:500;">${escapeHtml(title)} <span style="font-size:12px;font-weight:400;margin-left:6px;">${label}</span></div>
-          <div style="font-size:12px;color:#6b7280;">${escapeHtml(author)} \u00B7 ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
-          ${notePreview ? `<div style="font-size:12px;margin-top:2px;">${escapeHtml(notePreview)}</div>` : ""}
+          <div style="font-weight:500;overflow-wrap:anywhere;">${escapeHtml(title)} <span style="font-size:12px;font-weight:400;margin-left:6px;">${label}</span></div>
+          <div style="font-size:12px;color:#6b7280;overflow-wrap:anywhere;">${escapeHtml(author)} \u00B7 ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
+          ${notePreview ? `<div style="font-size:12px;margin-top:2px;overflow-wrap:anywhere;">${escapeHtml(notePreview)}</div>` : ""}
           ${reportsHtml}
           ${photosHtml}
           <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
@@ -3619,9 +3634,10 @@ async function saveEditComment(commentId) {
     });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      const msg = data.detail === "edit_time_expired"
-        ? "Время редактирования истекло (1 час)."
-        : "Ошибка: " + (data.detail || resp.status);
+      let msg;
+      if (data.detail === "edit_time_expired") msg = "Время редактирования истекло (1 час).";
+      else if (resp.status === 422) msg = "Текст слишком длинный (макс. 1000 символов).";
+      else msg = "Ошибка: " + (data.detail || resp.status);
       alert(msg);
       if (data.detail === "edit_time_expired" && _commentsPlaceId) await loadComments(_commentsPlaceId);
       return;
@@ -3713,6 +3729,11 @@ async function submitComment() {
 
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
+      // Pydantic 422 возвращает detail как массив — обрабатываем отдельно
+      if (resp.status === 422) {
+        if (statusEl) { statusEl.innerText = "Текст слишком длинный (макс. 1000 символов)."; statusEl.style.color = "#b91c1c"; }
+        return;
+      }
       const msg = data.detail || "Ошибка";
       const messages = {
         "empty_text": "Текст не может быть пустым.",
@@ -4125,8 +4146,8 @@ function renderAdminUsers(users) {
 
     return `
       <div style="padding:6px 0;border-bottom:1px solid #e5e7eb;">
-        <div style="font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;">${esc(u.login || "—")}</div>
-        <div style="font-size:11px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;">${esc(u.email || "нет email")}</div>
+        <div style="font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.login || "—")}</div>
+        <div style="font-size:11px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.email || "нет email")}</div>
         <div style="margin-top:3px;">${roleHtml}</div>
       </div>
     `;
@@ -4177,7 +4198,11 @@ function maybeRefreshSearchResults() {
 }
 
 map.on("load", refresh);
-map.on("moveend", refresh);
+let _refreshTimer = null;
+map.on("moveend", () => {
+  clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(refresh, 300);
+});
 
 // --- Layer destructive actions ---
 async function leaveLayer(groupId) {
