@@ -77,6 +77,10 @@ class ReportService:
         if existing:
             raise ValueError("already_reported")
 
+        # Лимит длины комментария
+        if comment and len(comment) > 1000:
+            raise ValueError("comment_too_long")
+
         report = Report(
             place_id=place_id,
             user_id=user.id,
@@ -86,9 +90,6 @@ class ReportService:
             created_at=datetime.now(timezone.utc),
         )
         db.add(report)
-
-        # Точка уходит на модерацию
-        place.moderation_status = "pending"
 
         try:
             db.commit()
@@ -134,6 +135,9 @@ class ReportService:
 
         Возвращает количество обновлённых записей.
         """
+        if new_status not in ("dismissed", "upheld"):
+            raise ValueError("invalid_report_status")
+
         now = datetime.now(timezone.utc)
         count = (
             db.query(Report)

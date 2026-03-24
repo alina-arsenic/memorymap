@@ -2470,14 +2470,12 @@ async function refresh() {
           ? p.title
           : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
 
-      // плашка «На модерации» / «Поступила жалоба» для pending-точек
+      // плашка «На модерации» (новая точка) / «Поступила жалоба» (approved с жалобой)
       let pendingBadge = "";
       if (isPending) {
-        if (p.isMine && p.has_report) {
-          pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Поступила жалоба</div>`;
-        } else {
-          pendingBadge = `<div class="mm-report-badge mm-report-badge--pending">На модерации</div>`;
-        }
+        pendingBadge = `<div class="mm-report-badge mm-report-badge--pending">На модерации</div>`;
+      } else if (p.isMine && p.has_report) {
+        pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Поступила жалоба</div>`;
       }
 
       // Кнопка «⋯» → «Пожаловаться» на чужих approved-точках
@@ -3110,7 +3108,11 @@ async function loadModerationQueue() {
     list.innerHTML = items.map(p => {
       const title = (p.title || "").trim() || `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
       const author = p.user_login || p.username || "Аноним";
-      const esc = (s) => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+      // Метка: новая точка или жалобы на approved-точку
+      const label = p.moderation_status === "approved"
+        ? '<span style="color:#dc2626;font-weight:500;">\u26A0 Жалобы</span>'
+        : '<span style="color:#6b7280;">Новая точка</span>';
 
       // Обрезаем описание до 100 символов для превью
       const notePreview = p.note && p.note.length > 100
@@ -3119,7 +3121,7 @@ async function loadModerationQueue() {
 
       // Превью фотографий
       const photos = (p.media || []).map(m =>
-        `<img src="${esc(m.url)}" data-full="${esc(m.url)}" alt="фото"
+        `<img src="${escapeHtml(m.url)}" data-full="${escapeHtml(m.url)}" alt="фото"
           class="mm-photo-thumb"
           style="width:60px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;" />`
       ).join("");
@@ -3131,16 +3133,16 @@ async function loadModerationQueue() {
       const reports = Array.isArray(p.reports) ? p.reports : [];
       const reportsHtml = reports.map(r => {
         const who = r.user_login || r.username || `user#${r.user_id}`;
-        const cat = esc(r.category_label || r.category);
-        const comm = r.comment ? ": " + esc(r.comment) : "";
-        return `<div class="mm-report-line">Жалоба от @${esc(who)}: ${cat}${comm}</div>`;
+        const cat = escapeHtml(r.category_label || r.category);
+        const comm = r.comment ? ": " + escapeHtml(r.comment) : "";
+        return `<div class="mm-report-line">Жалоба от @${escapeHtml(who)}: ${cat}${comm}</div>`;
       }).join("");
 
       return `
         <div style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
-          <div style="font-weight:500;">${esc(title)}</div>
-          <div style="font-size:12px;color:#6b7280;">${esc(author)} · ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
-          ${notePreview ? `<div style="font-size:12px;margin-top:2px;">${esc(notePreview)}</div>` : ""}
+          <div style="font-weight:500;">${escapeHtml(title)} <span style="font-size:12px;font-weight:400;margin-left:6px;">${label}</span></div>
+          <div style="font-size:12px;color:#6b7280;">${escapeHtml(author)} \u00B7 ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
+          ${notePreview ? `<div style="font-size:12px;margin-top:2px;">${escapeHtml(notePreview)}</div>` : ""}
           ${reportsHtml}
           ${photosHtml}
           <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
@@ -3177,7 +3179,10 @@ function showPlaceOnMap(placeId, lon, lat, groupId) {
   map.flyTo({ center: [lon, lat], zoom: 16 });
 }
 
+let _moderating = false;
 async function moderatePlace(placeId, status) {
+  if (_moderating) return;
+  _moderating = true;
   try {
     const resp = await apiFetch(`/v1/moderation/places/${placeId}`, {
       method: "PATCH",
@@ -3194,6 +3199,8 @@ async function moderatePlace(placeId, status) {
   } catch (e) {
     console.error(e);
     alert("Ошибка сети при модерации.");
+  } finally {
+    _moderating = false;
   }
 }
 
@@ -3949,6 +3956,7 @@ function closeReportModalOnOverlay(e) {
   if (e.target === e.currentTarget) closeReportModal();
 }
 
+let _submittingReport = false;
 async function submitReport() {
   if (!_reportPlaceId) return;
   if (!accessToken) { alert("Нужно войти."); return; }
@@ -3963,6 +3971,9 @@ async function submitReport() {
     if (statusEl) { statusEl.innerText = "Для категории «Другое» укажите комментарий."; statusEl.style.color = "#b91c1c"; }
     return;
   }
+
+  if (_submittingReport) return;
+  _submittingReport = true;
 
   if (statusEl) { statusEl.innerText = "Отправка..."; statusEl.style.color = ""; }
 
@@ -3981,7 +3992,8 @@ async function submitReport() {
         "cannot_report_own_place": "Нельзя пожаловаться на свою точку.",
         "already_dismissed": "Вы уже жаловались ранее, жалоба была отклонена модератором.",
         "already_reported": "Вы уже отправили жалобу на эту точку.",
-        "place_not_approved": "Жалоба уже отправлена, точка на модерации.",
+        "place_not_approved": "Точка не одобрена.",
+        "comment_too_long": "Комментарий слишком длинный (макс. 1000 символов).",
         "invalid_category": "Некорректная категория.",
       };
       if (statusEl) { statusEl.innerText = messages[msg] || `Ошибка: ${msg}`; statusEl.style.color = "#b91c1c"; }
@@ -3993,6 +4005,8 @@ async function submitReport() {
   } catch (e) {
     console.error(e);
     if (statusEl) { statusEl.innerText = "Ошибка сети."; statusEl.style.color = "#b91c1c"; }
+  } finally {
+    _submittingReport = false;
   }
 }
 

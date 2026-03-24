@@ -2,11 +2,12 @@
 
 from app.core.auth import get_current_user
 from app.core.deps import get_db
-from app.models.models import Place, User
-from app.services.reports import ReportService
+from app.models.models import Media, Place, Report, User
+from app.services.reports import CATEGORY_LABELS, ReportService
 from app.storage import presign_get
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import and_, exists, or_
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -31,30 +32,77 @@ def list_moderation_places(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Получить точки с заданным статусом модерации."""
+    """Получить точки с заданным статусом модерации.
+
+    При status=pending возвращает как новые pending-точки, так и
+    approved-точки с pending-жалобами (чтобы модератор видел их).
+    """
     _require_moderator(current_user)
 
-    q = (
-        db.query(Place, User)
-        .outerjoin(User, Place.user_id == User.id)
-        .filter(Place.moderation_status == status)
-        .order_by(Place.id.asc())
-        .limit(200)
-    )
+    # Расширенный запрос: pending-точки + approved-точки с pending-жалобами
+    if status == "pending":
+        has_pending_reports = exists().where(
+            and_(Report.place_id == Place.id, Report.status == "pending")
+        )
+        q = (
+            db.query(Place, User)
+            .outerjoin(User, Place.user_id == User.id)
+            .filter(or_(
+                Place.moderation_status == "pending",
+                and_(Place.moderation_status == "approved", has_pending_reports),
+            ))
+            .order_by(Place.id.asc())
+            .limit(200)
+        )
+    else:
+        q = (
+            db.query(Place, User)
+            .outerjoin(User, Place.user_id == User.id)
+            .filter(Place.moderation_status == status)
+            .order_by(Place.id.asc())
+            .limit(200)
+        )
 
+    rows = q.all()
+    place_ids = [p.id for p, _u in rows]
+
+    # Batch-загрузка медиа (вместо N+1)
+    all_media = (
+        db.query(Media).filter(Media.place_id.in_(place_ids)).all()
+        if place_ids else []
+    )
+    media_by_place: dict[int, list] = {}
+    for m in all_media:
+        media_by_place.setdefault(m.place_id, []).append(m)
+
+    # Batch-загрузка pending-жалоб с авторами (вместо N+1)
+    report_rows = (
+        db.query(Report, User)
+        .outerjoin(User, Report.user_id == User.id)
+        .filter(Report.place_id.in_(place_ids), Report.status == "pending")
+        .order_by(Report.created_at.asc())
+        .all()
+    ) if place_ids else []
+    reports_by_place: dict[int, list] = {}
+    for r, u in report_rows:
+        reports_by_place.setdefault(r.place_id, []).append({
+            "id": r.id,
+            "user_id": r.user_id,
+            "user_login": u.login if u else None,
+            "username": u.username if u else None,
+            "category": r.category,
+            "category_label": CATEGORY_LABELS.get(r.category, r.category),
+            "comment": r.comment,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    # Сборка ответа
     items = []
-    for place, user in q.all():
-        # подтягиваем первое фото для превью (если есть)
-        from app.models.models import Media
-        media_rows = db.query(Media).filter(Media.place_id == place.id).limit(3).all()
+    for place, user in rows:
         media_list = [
             {"id": m.id, "key": m.s3_key, "url": presign_get(m.s3_key)}
-            for m in media_rows
+            for m in media_by_place.get(place.id, [])[:3]
         ]
-
-        # Жалобы на эту точку (pending)
-        reports_list = ReportService.get_pending_reports_for_place(db, place.id)
-
         items.append({
             "id": place.id,
             "group_id": place.group_id,
@@ -67,7 +115,7 @@ def list_moderation_places(
             "user_login": user.login if user else None,
             "username": user.username if user else None,
             "media": media_list,
-            "reports": reports_list,
+            "reports": reports_by_place.get(place.id, []),
         })
 
     return {"items": items}
