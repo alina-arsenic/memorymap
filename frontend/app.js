@@ -756,6 +756,8 @@ function uiLogout() {
   _prevBlockedHtml = "";
   _prevGroupLayersHtml = "";
   _prevGroupSelectHtml = "";
+  selectedGroupLayerIds.clear();
+  personalGroupId = null;
 
   // вернуть верхнюю надпись
   const userTitle = document.getElementById("user-title");
@@ -810,11 +812,25 @@ function uiLogout() {
 // --- Удаление аккаунта ---
 
 function openDeleteAccountModal() {
-  document.getElementById("delete-account-overlay").style.display = "flex";
+  const overlay = document.getElementById("delete-account-overlay");
+  const pwSection = document.getElementById("delete-account-password-section");
+  const noPwHint = document.getElementById("delete-account-no-password-hint");
+  const pwInput = document.getElementById("delete-account-password");
+
+  // Показываем/скрываем поле пароля в зависимости от has_password
+  const hasPw = currentUser && currentUser.has_password;
+  if (pwSection) pwSection.style.display = hasPw ? "" : "none";
+  if (noPwHint) noPwHint.style.display = hasPw ? "none" : "";
+  if (pwInput) pwInput.value = "";
+
+  overlay.style.display = "flex";
 }
 
 function closeDeleteAccountModal() {
   document.getElementById("delete-account-overlay").style.display = "none";
+  // Очищаем поле пароля при закрытии
+  const pwInput = document.getElementById("delete-account-password");
+  if (pwInput) pwInput.value = "";
 }
 
 function closeDeleteAccountModalOnOverlay(e) {
@@ -822,19 +838,42 @@ function closeDeleteAccountModalOnOverlay(e) {
 }
 
 async function confirmDeleteAccount() {
-  const resp = await fetch(`${API_BASE}/v1/me`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const btn = document.getElementById("delete-account-confirm-btn");
+  if (btn && btn.disabled) return;
 
-  if (!resp.ok) {
-    alert("Не удалось удалить аккаунт.");
+  const hasPw = currentUser && currentUser.has_password;
+  const pwInput = document.getElementById("delete-account-password");
+  const password = pwInput ? pwInput.value : "";
+
+  // Если есть пароль — требуем его ввод
+  if (hasPw && !password) {
+    alert("Введите пароль для подтверждения удаления.");
     return;
   }
 
-  closeDeleteAccountModal();
-  uiLogout();
-  alert("Аккаунт успешно удалён.");
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await apiFetch("/v1/me/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+
+    if (resp.status === 403) {
+      alert("Неправильный пароль.");
+      return;
+    }
+    if (!resp.ok) {
+      alert("Не удалось удалить аккаунт.");
+      return;
+    }
+
+    closeDeleteAccountModal();
+    uiLogout();
+    alert("Аккаунт успешно удалён.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function startTelegramLink() {
@@ -1527,7 +1566,13 @@ document.addEventListener("keydown", (e) => {
       });
       return;
     }
-    // Приоритет 3: закрываем модалку комментариев
+    // Приоритет 3: закрываем модалку удаления аккаунта
+    const delOverlay = document.getElementById("delete-account-overlay");
+    if (delOverlay && delOverlay.style.display !== "none") {
+      closeDeleteAccountModal();
+      return;
+    }
+    // Приоритет 4: закрываем модалку комментариев
     const commOverlay = document.getElementById("comments-overlay");
     if (commOverlay && commOverlay.style.display !== "none") {
       closeCommentsModal();

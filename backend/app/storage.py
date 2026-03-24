@@ -132,6 +132,22 @@ def delete_place_folder(place_id: int) -> None:
         objects = [{"Key": obj["Key"]} for obj in contents]
         s3.delete_objects(Bucket=BUCKET, Delete={"Objects": objects})
 
+def delete_user_uploads(user_id: int) -> None:
+    """Удаляет все временные загрузки пользователя (uploads/{user_id}/) из S3."""
+    s3 = s3_client()
+    ensure_bucket(s3)
+
+    prefix = f"uploads/{user_id}/"
+    paginator = s3.get_paginator("list_objects_v2")
+
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix):
+        contents = page.get("Contents", [])
+        if not contents:
+            continue
+        objects = [{"Key": obj["Key"]} for obj in contents]
+        s3.delete_objects(Bucket=BUCKET, Delete={"Objects": objects})
+
+
 def delete_object(key: str) -> None:
     s3 = s3_client()
     ensure_bucket(s3)

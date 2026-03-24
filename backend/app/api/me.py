@@ -1,3 +1,4 @@
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -34,10 +35,13 @@ from app.services.group_invites import GroupInviteService
 from app.services.groups import GroupService
 from app.services.notifications import NotificationService
 from app.services.users import UserService
-from app.storage import delete_place_folder
+from app.storage import delete_place_folder, delete_user_uploads
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 _LOGIN_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -68,6 +72,7 @@ def me(
         "email": current_user.email,
         "username": current_user.username,
         "role": current_user.role,
+        "has_password": bool(current_user.password_hash),
         "groups": groups,
         "friends": friends,
         "friend_requests_inbox_count": inbox_count,
@@ -116,31 +121,71 @@ def telegram_link_start(
     }
 
 
-@router.delete("/me")
-def delete_account(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Удаление аккаунта текущего пользователя и всех связанных данных."""
-    if current_user is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+def _do_delete_account(user: User, db: Session) -> dict:
+    """Общая логика удаления аккаунта (вызывается из DELETE и POST)."""
+    uid = user.id
 
-    uid = current_user.id
+    # 1. Обработка не-личных групп, где юзер — owner
+    owned_groups = (
+        db.query(Group)
+        .filter(Group.owner_id == uid, Group.is_personal.is_(False))
+        .all()
+    )
+    for grp in owned_groups:
+        # Ищем нового владельца: сначала editor, потом viewer (по user_id ASC)
+        new_owner_row = db.execute(
+            text(
+                "SELECT user_id, role FROM membership "
+                "WHERE group_id = :gid AND user_id != :uid "
+                "ORDER BY CASE WHEN role='editor' THEN 0 ELSE 1 END, user_id "
+                "LIMIT 1"
+            ),
+            {"gid": grp.id, "uid": uid},
+        ).fetchone()
 
-    # 1. Удаляем файлы из MinIO для каждой точки пользователя
+        if new_owner_row:
+            new_owner_id = new_owner_row[0]
+            # Назначаем нового владельца
+            db.execute(
+                text(
+                    "UPDATE membership SET role='owner' "
+                    "WHERE user_id = :new_uid AND group_id = :gid"
+                ),
+                {"new_uid": new_owner_id, "gid": grp.id},
+            )
+            grp.owner_id = new_owner_id
+        else:
+            # Нет других участников — удаляем S3 файлы точек и саму группу
+            group_places = db.query(Place).filter(Place.group_id == grp.id).all()
+            for gp in group_places:
+                try:
+                    delete_place_folder(gp.id)
+                except Exception:
+                    logger.warning(
+                        "S3: не удалось удалить папку точки %d группы %d",
+                        gp.id, grp.id, exc_info=True,
+                    )
+            db.delete(grp)  # CASCADE удалит places, media, membership и т.д.
+
+    # 2. Удаляем S3 файлы для каждой точки пользователя
     user_places = db.query(Place).filter(Place.user_id == uid).all()
     for place in user_places:
-        delete_place_folder(place.id)
+        try:
+            delete_place_folder(place.id)
+        except Exception:
+            logger.warning(
+                "S3: не удалось удалить папку точки %d", place.id, exc_info=True,
+            )
 
-    # 2. Удаляем медиа-записи точек пользователя
+    # 3. Удаляем медиа-записи точек пользователя
     place_ids = [p.id for p in user_places]
     if place_ids:
         db.query(Media).filter(Media.place_id.in_(place_ids)).delete(synchronize_session=False)
 
-    # 3. Удаляем точки пользователя
+    # 4. Удаляем точки пользователя
     db.query(Place).filter(Place.user_id == uid).delete(synchronize_session=False)
 
-    # 4. Удаляем дружбы, запросы дружбы и инвайты в группы
+    # 5. Удаляем дружбы, запросы дружбы и инвайты в группы
     db.query(GroupInvite).filter(
         (GroupInvite.from_user_id == uid) | (GroupInvite.to_user_id == uid)
     ).delete(synchronize_session=False)
@@ -154,17 +199,29 @@ def delete_account(
         (Friend.user_id == uid) | (Friend.friend_id == uid)
     ).delete(synchronize_session=False)
 
-    # 5. Удаляем личные группы пользователя (и их точки через CASCADE в БД)
-    db.query(Group).filter(Group.owner_id == uid, Group.is_personal.is_(True)).delete(
-        synchronize_session=False
+    # 6. Удаляем личные группы пользователя (CASCADE удалит places, media)
+    personal_groups = (
+        db.query(Group).filter(Group.owner_id == uid, Group.is_personal.is_(True)).all()
     )
+    for pg in personal_groups:
+        # S3 cleanup для точек личных групп (если ещё не удалены выше)
+        pg_places = db.query(Place).filter(Place.group_id == pg.id).all()
+        for pp in pg_places:
+            try:
+                delete_place_folder(pp.id)
+            except Exception:
+                logger.warning(
+                    "S3: не удалось удалить папку точки %d личной группы %d",
+                    pp.id, pg.id, exc_info=True,
+                )
+        db.delete(pg)
 
-    # 6. Удаляем блокировки пользователя
+    # 7. Удаляем блокировки пользователя
     db.query(UserBlock).filter(
         (UserBlock.blocker_id == uid) | (UserBlock.blocked_id == uid)
     ).delete(synchronize_session=False)
 
-    # 7. Удаляем коды верификации, сброса пароля и привязки Telegram
+    # 8. Удаляем коды верификации, сброса пароля и привязки Telegram
     db.query(EmailVerificationCode).filter(EmailVerificationCode.user_id == uid).delete(
         synchronize_session=False
     )
@@ -175,11 +232,54 @@ def delete_account(
         synchronize_session=False
     )
 
-    # 8. Удаляем самого пользователя
-    db.delete(current_user)
+    # 9. Удаляем временные загрузки пользователя из S3
+    try:
+        delete_user_uploads(uid)
+    except Exception:
+        logger.warning("S3: не удалось удалить uploads/%d/", uid, exc_info=True)
+
+    # 10. Удаляем самого пользователя
+    db.delete(user)
     db.commit()
 
     return {"detail": "account_deleted"}
+
+
+@router.delete("/me")
+def delete_account(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Удаление аккаунта (legacy, без подтверждения паролем)."""
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return _do_delete_account(current_user, db)
+
+
+class DeleteAccountReq(BaseModel):
+    password: str = ""
+
+
+@router.post("/me/delete")
+def delete_account_confirmed(
+    req: DeleteAccountReq,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Удаление аккаунта с подтверждением паролем."""
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Защита от bcrypt DoS
+    if len(req.password) > 128:
+        raise HTTPException(status_code=400, detail="password_too_long")
+
+    # Проверка пароля (если у юзера есть пароль)
+    if current_user.password_hash:
+        if not verify_password(req.password, current_user.password_hash):
+            raise HTTPException(status_code=403, detail="wrong_password")
+
+    return _do_delete_account(current_user, db)
 
 
 # ---------- F3: Сменить пароль ----------

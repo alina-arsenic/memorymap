@@ -168,7 +168,7 @@ class PlaceService:
 
         items: List[Dict] = []
         for place, user in rows:
-            items.append({
+            item = {
                 "id": place.id,
                 "title": place.title,
                 "note": place.note,
@@ -181,7 +181,8 @@ class PlaceService:
                 "media": media_map.get(place.id, []),
                 "has_report": place.id in report_place_ids,
                 "comments_count": comments_count_map.get(place.id, 0),
-            })
+            }
+            items.append(item)
         return items
 
     @staticmethod
@@ -295,25 +296,24 @@ class PlaceService:
 
         items: List[Dict] = []
         for place, user, group in rows:
-            items.append(
-                {
-                    "id": place.id,
-                    "group_id": place.group_id,
-                    "title": place.title,
-                    "note": place.note,
-                    "lat": place.lat,
-                    "lon": place.lon,
-                    "user_id": place.user_id,
-                    "username": user.username if user else None,
-                    "user_login": user.login if user else None,
-                    "moderation_status": place.moderation_status,
-                    "media": media_map.get(place.id, []),
-                    "group_visibility": group.visibility,
-                    "group_is_personal": group.is_personal,
-                    "has_report": place.id in report_place_ids,
-                    "comments_count": comments_count_map.get(place.id, 0),
-                }
-            )
+            item = {
+                "id": place.id,
+                "group_id": place.group_id,
+                "title": place.title,
+                "note": place.note,
+                "lat": place.lat,
+                "lon": place.lon,
+                "user_id": place.user_id,
+                "username": user.username if user else None,
+                "user_login": user.login if user else None,
+                "moderation_status": place.moderation_status,
+                "media": media_map.get(place.id, []),
+                "group_visibility": group.visibility,
+                "group_is_personal": group.is_personal,
+                "has_report": place.id in report_place_ids,
+                "comments_count": comments_count_map.get(place.id, 0),
+            }
+            items.append(item)
         return items
 
     @staticmethod

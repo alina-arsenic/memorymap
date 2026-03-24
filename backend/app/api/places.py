@@ -208,7 +208,7 @@ def update_place(
         raw = "" if raw is None else str(raw)
         if len(raw) > 5000:
             raise HTTPException(status_code=400, detail="note_too_long")
-        place.note = raw  # note можно пустым
+        place.note = raw
 
     db.commit()
     return {"status": "ok"}

@@ -419,9 +419,18 @@
             Вы уверены, что хотите удалить аккаунт? Все ваши точки, фотографии и данные будут
             удалены безвозвратно.
           </div>
+          <div id="delete-account-password-section" style="display: none; margin-bottom: 12px">
+            <div class="field-label">Введите пароль для подтверждения</div>
+            <input type="password" id="delete-account-password" class="input"
+              placeholder="Ваш пароль"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();confirmDeleteAccount();}" />
+          </div>
+          <div id="delete-account-no-password-hint" class="hint" style="display: none; margin-bottom: 12px">
+            Для подтверждения нажмите «Удалить».
+          </div>
           <div style="display: flex; gap: 8px; justify-content: flex-end">
             <button class="btn" onclick="closeDeleteAccountModal()">Отмена</button>
-            <button class="btn btn-danger" onclick="confirmDeleteAccount()">Удалить</button>
+            <button id="delete-account-confirm-btn" class="btn btn-danger" onclick="confirmDeleteAccount()">Удалить</button>
           </div>
         </div>
       </div>
