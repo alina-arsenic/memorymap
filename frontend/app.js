@@ -1508,8 +1508,8 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
-    // Приоритет 1: закрываем dropdown-меню
-    const openDropdowns = document.querySelectorAll(".comment-actions .mm-popup-dropdown.open");
+    // Приоритет 1: закрываем все dropdown-меню (report + comment)
+    const openDropdowns = document.querySelectorAll(".mm-popup-dropdown.open");
     if (openDropdowns.length) {
       openDropdowns.forEach(el => el.classList.remove("open"));
       return;
@@ -2340,6 +2340,107 @@ currentMarkers = [];
 markersByPlaceId = {};
 }
 
+// ========= Кластеризация маркеров (grid-based) =========
+
+/** Группирует близкие точки в кластеры (по расстоянию).
+ *  excludeId — id точки, которую не кластеризовать (для pendingPopupPlaceId). */
+function clusterPoints(points, zoom, excludeId) {
+  if (points.length === 0) return points;
+
+  // Радиус кластеризации: при удалении больше, при приближении меньше
+  // zoom 8 → ~26px, zoom 10 → ~20px, zoom 12 → ~14px, zoom 14+ → ~8px
+  const base = Math.max(8, 50 - zoom * 3);
+  const radius = base / Math.pow(2, zoom);
+  const r2 = radius * radius;
+
+  // Исключаем точку, для которой нужен попап
+  let excluded = null;
+  let toCluster = points;
+  if (excludeId != null) {
+    toCluster = [];
+    for (const p of points) {
+      if (p.id === excludeId) excluded = p;
+      else toCluster.push(p);
+    }
+  }
+  const clusters = []; // [{lat, lon, points: [...]}]
+
+  for (const p of toCluster) {
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const c of clusters) {
+      const dlat = p.lat - c.lat;
+      const dlon = p.lon - c.lon;
+      const d2 = dlat * dlat + dlon * dlon;
+      if (d2 <= r2 && d2 < nearestDist) {
+        nearest = c;
+        nearestDist = d2;
+      }
+    }
+    if (nearest) {
+      nearest.points.push(p);
+      // Обновляем центроид
+      const n = nearest.points.length;
+      nearest.lat = (nearest.lat * (n - 1) + p.lat) / n;
+      nearest.lon = (nearest.lon * (n - 1) + p.lon) / n;
+    } else {
+      clusters.push({ lat: p.lat, lon: p.lon, points: [p] });
+    }
+  }
+
+  const result = [];
+  for (const c of clusters) {
+    if (c.points.length === 1) {
+      result.push(c.points[0]);
+    } else {
+      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+      for (const p of c.points) {
+        if (p.lat < minLat) minLat = p.lat;
+        if (p.lat > maxLat) maxLat = p.lat;
+        if (p.lon < minLon) minLon = p.lon;
+        if (p.lon > maxLon) maxLon = p.lon;
+      }
+      // Вычисляем зум, при котором кластер точно разделится
+      const diagLat = maxLat - minLat;
+      const diagLon = maxLon - minLon;
+      const diag = Math.sqrt(diagLat * diagLat + diagLon * diagLon);
+      let splitZoom = 18;
+      for (let z = Math.floor(zoom) + 1; z <= 18; z++) {
+        const b = Math.max(8, 50 - z * 3);
+        const r = b / Math.pow(2, z);
+        if (diag > 2 * r) { splitZoom = z; break; }
+      }
+      // Точки на одинаковых координатах: при высоком зуме показываем индивидуально
+      if (splitZoom > 17 && zoom >= 17) {
+        for (const p of c.points) result.push(p);
+        continue;
+      }
+      result.push({
+        _isCluster: true,
+        _count: c.points.length,
+        lat: c.lat,
+        lon: c.lon,
+        _bounds: [[minLon, minLat], [maxLon, maxLat]],
+        _splitZoom: splitZoom,
+      });
+    }
+  }
+  // Добавляем исключённую точку как индивидуальный маркер
+  if (excluded) result.push(excluded);
+  return result;
+}
+
+/** Создаёт DOM-элемент для маркера кластера */
+function createClusterMarker(count) {
+  const size = count < 10 ? 28 : count < 50 ? 36 : 44;
+  const el = document.createElement("div");
+  el.className = "mm-cluster-marker";
+  el.style.width = size + "px";
+  el.style.height = size + "px";
+  el.textContent = count;
+  return el;
+}
+
 function updateCounter(n) {
 document.getElementById("points-counter").innerText = "Точек: " + n;
 }
@@ -2357,7 +2458,7 @@ tempCoords = { lng: lngLat.lng, lat: lngLat.lat };
 const coordsEl = document.getElementById("web-coords");
 if (coordsEl) {
     coordsEl.textContent =
-    tempCoords.lat.toFixed(5) + ", " + tempCoords.lng.toFixed(5);
+    tempCoords.lat.toFixed(5) + ", " + tempCoords.lng.toFixed(5) + "  (широта, долгота)";
 }
 
 // убираем старый временный маркер, если был
@@ -2459,7 +2560,25 @@ async function refresh() {
 
   clearMarkers();
 
-  filtered.forEach(p => {
+  // Кластеризация: при зуме < 15 группируем близкие точки
+  const clustered = clusterPoints(filtered, map.getZoom(), pendingPopupPlaceId);
+
+  clustered.forEach(p => {
+      // Кластер — круг с числом, клик зумит ближе
+      if (p._isCluster) {
+        const el = createClusterMarker(p._count);
+        el.addEventListener("click", () => {
+          // Зумим до уровня, где кластер точно разделится (минимум +1, максимум 18)
+          const targetZoom = Math.min(18, Math.max(map.getZoom() + 1, p._splitZoom));
+          map.flyTo({ center: [p.lon, p.lat], zoom: targetZoom });
+        });
+        const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+          .setLngLat([p.lon, p.lat])
+          .addTo(map);
+        currentMarkers.push(marker);
+        return;
+      }
+
       // серый пин для точек на модерации/отклонённых, зелёный для своих, синий для чужих
       const isPending = p.moderation_status === "pending";
       const isRejected = p.moderation_status === "rejected";
@@ -2480,7 +2599,7 @@ async function refresh() {
       if (isPending) {
         pendingBadge = `<div class="mm-report-badge mm-report-badge--pending">На модерации</div>`;
       } else if (isRejected && p.isMine) {
-        pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Отклонено модератором</div>`;
+        pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Отклонено</div>`;
       } else if (p.isMine && p.has_report) {
         pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Поступила жалоба</div>`;
       }
@@ -2489,8 +2608,8 @@ async function refresh() {
       const canReport = !p.isMine && !isPending && currentUser;
       const reportMenuHtml = canReport
         ? `<div class="mm-popup-menu">
-            <button class="mm-popup-menu-btn" onclick="var dd=this.nextElementSibling;dd.style.display=dd.style.display==='block'?'none':'block';event.stopPropagation();">⋯</button>
-            <div class="mm-popup-dropdown" style="display:none">
+            <button class="mm-popup-menu-btn" onclick="this.nextElementSibling.classList.toggle('open');event.stopPropagation();" title="Действия">⋯</button>
+            <div class="mm-popup-dropdown">
               <button class="mm-popup-dropdown-item" onclick="openReportModal(${p.id})">Пожаловаться</button>
             </div>
           </div>`
@@ -2582,7 +2701,7 @@ async function refresh() {
             ${reportMenuHtml}
           </div>
           ${noteBlock}
-          <div style="margin-top:6px;font-size:11px;color:#6b7280;overflow-wrap:anywhere;">${esc(who)}</div>
+          <div style="margin-top:6px;font-size:11px;color:#6b7280;overflow-wrap:break-word;">${esc(who)}</div>
           ${pendingBadge}
           ${moderationBtns}
           ${addBtnHtml}
@@ -2602,7 +2721,8 @@ async function refresh() {
   });
 
   // Открываем попап, если был запрос через "Показать на карте"
-  if (pendingPopupPlaceId !== null) {
+  // Только когда карта остановилась — иначе следующий refresh уничтожит попап
+  if (pendingPopupPlaceId !== null && !map.isMoving()) {
     const marker = markersByPlaceId[pendingPopupPlaceId];
     if (marker) {
       marker.togglePopup();
@@ -2616,9 +2736,10 @@ async function refresh() {
         // Небольшая задержка — попап должен появиться в DOM
         setTimeout(() => openCommentsModal(pId, placeUserId, cId), 100);
       }
+      pendingPopupPlaceId = null;
+      pendingPopupGroupId = null;
     }
-    pendingPopupPlaceId = null;
-    pendingPopupGroupId = null;
+    // Маркер не найден или карта ещё летит — следующий refresh попробует снова
   }
 
   updateCounter(filtered.length);
@@ -2715,6 +2836,7 @@ document.addEventListener("click", async (e) => {
 
 // ========= Фото-галерея (lightbox) =========
 let _galleryState = null; // null = закрыта, { urls: string[], index: number }
+let _galleryLoadGen = 0;  // счётчик поколений загрузки — защита от гонки callback'ов
 
 function openGallery(urls, index) {
   // Защита от двойного клика — удаляем старую галерею
@@ -2747,9 +2869,15 @@ function openGallery(urls, index) {
 
   var img = document.createElement("img");
   img.className = "mm-gallery-img";
+  img.alt = "Фото";
+
+  // Spinner загрузки фото
+  var spinner = document.createElement("div");
+  spinner.className = "mm-gallery-spinner";
 
   modal.appendChild(closeBtn);
   modal.appendChild(prevBtn);
+  modal.appendChild(spinner);
   modal.appendChild(img);
   modal.appendChild(nextBtn);
 
@@ -2781,6 +2909,7 @@ function closeGallery() {
   var modal = document.getElementById("mm-photo-modal");
   if (modal) modal.remove();
   _galleryState = null;
+  _galleryLoadGen++;  // инвалидируем все pending callback'и preload-изображений
   document.body.style.overflow = "";
 }
 
@@ -2797,17 +2926,46 @@ function _galleryUpdateView() {
   if (!modal) return;
   var img = modal.querySelector(".mm-gallery-img");
   if (!img) return;
+  var spinner = modal.querySelector(".mm-gallery-spinner");
 
-  var idx = _galleryState.index;
-  var url = _galleryState.urls[idx];
-  // Прелоадим фото: старое остаётся видимым, новое подменяется мгновенно когда готово.
-  // Проверяем idx при onload — при быстрых кликах устаревший preload не перезапишет актуальное фото.
+  var url = _galleryState.urls[_galleryState.index];
+
+  // Увеличиваем поколение — все предыдущие callback'и станут неактуальными
+  var gen = ++_galleryLoadGen;
+
+  // Убираем предыдущее сообщение об ошибке
+  var oldErr = modal.querySelector(".mm-gallery-error");
+  if (oldErr) oldErr.remove();
+  img.style.display = "";
+
+  // Показываем spinner, делаем текущее фото полупрозрачным
+  img.style.opacity = "0.3";
+  if (spinner) spinner.style.display = "";
+
   var preload = new Image();
   preload.onload = function() {
-    if (_galleryState && _galleryState.index === idx) img.src = url;
+    // Проверяем что это всё ещё актуальный запрос (защита от быстрых кликов)
+    if (_galleryLoadGen !== gen) return;
+    // Убираем errEl если вдруг остался от предыдущего цикла
+    var staleErr = modal.querySelector(".mm-gallery-error");
+    if (staleErr) staleErr.remove();
+    img.style.display = "";
+    img.src = url;
+    img.alt = "Фото";
+    img.style.opacity = "1";
+    if (spinner) spinner.style.display = "none";
   };
   preload.onerror = function() {
-    if (_galleryState && _galleryState.index === idx) img.src = url;
+    if (_galleryLoadGen !== gen) return;
+    img.style.display = "none";
+    if (spinner) spinner.style.display = "none";
+    // Текстовое сообщение вместо broken image (проверяем что ещё нет errEl)
+    if (!modal.querySelector(".mm-gallery-error")) {
+      var errEl = document.createElement("div");
+      errEl.className = "mm-gallery-error";
+      errEl.textContent = "Не удалось загрузить фото";
+      modal.appendChild(errEl);
+    }
   };
   preload.src = url;
 }
@@ -3155,9 +3313,9 @@ async function loadModerationQueue() {
 
       return `
         <div style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
-          <div style="font-weight:500;overflow-wrap:anywhere;">${escapeHtml(title)} <span style="font-size:12px;font-weight:400;margin-left:6px;">${label}</span></div>
-          <div style="font-size:12px;color:#6b7280;overflow-wrap:anywhere;">${escapeHtml(author)} \u00B7 ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
-          ${notePreview ? `<div style="font-size:12px;margin-top:2px;overflow-wrap:anywhere;">${escapeHtml(notePreview)}</div>` : ""}
+          <div style="font-weight:500;overflow-wrap:break-word;">${escapeHtml(title)} <span style="font-size:12px;font-weight:400;margin-left:6px;">${label}</span></div>
+          <div style="font-size:12px;color:#6b7280;overflow-wrap:break-word;">${escapeHtml(author)} \u00B7 ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
+          ${notePreview ? `<div style="font-size:12px;margin-top:2px;overflow-wrap:break-word;">${escapeHtml(notePreview)}</div>` : ""}
           ${reportsHtml}
           ${photosHtml}
           <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
@@ -3191,7 +3349,19 @@ function showPlaceOnMap(placeId, lon, lat, groupId) {
   // сохраняем id для открытия попапа после refresh (который вызовется при moveend)
   pendingPopupPlaceId = placeId;
   pendingPopupGroupId = groupId || null;
+  pendingCommentId = null; // showPlaceOnMap не открывает комментарии — сбрасываем
   map.flyTo({ center: [lon, lat], zoom: 16 });
+  // Fallback: если карта уже на месте, flyTo не вызовет moveend
+  setTimeout(() => {
+    if (pendingPopupPlaceId !== null) refresh();
+  }, 800);
+  // Страховка: сбросить pending через 5 секунд если попап так и не открылся
+  setTimeout(() => {
+    if (pendingPopupPlaceId === placeId) {
+      pendingPopupPlaceId = null;
+      pendingPopupGroupId = null;
+    }
+  }, 5000);
 }
 
 let _moderating = false;
@@ -3865,12 +4035,15 @@ async function loadNotifications() {
     listEl.innerHTML = items.map(n => {
       const actor = n.actor_login || (n.actor_username ? "@" + n.actor_username : "Кто-то");
       const placeTitle = n.place_title || "точку";
-      const typeText = n.type === "reply_to_comment"
-        ? `<b>${esc(actor)}</b> — ответ на ваш комментарий к <b>"${esc(placeTitle)}"</b>`
-        : `<b>${esc(actor)}</b> — новый комментарий к вашей точке <b>"${esc(placeTitle)}"</b>`;
+      let typeText;
+      if (n.type === "reply_to_comment") {
+        typeText = `<b>${esc(actor)}</b> — ответ на ваш комментарий к <b>"${esc(placeTitle)}"</b>`;
+      } else {
+        typeText = `<b>${esc(actor)}</b> — новый комментарий к вашей точке <b>"${esc(placeTitle)}"</b>`;
+      }
 
       return `
-        <div class="notif-item notif-item--unread" onclick="goToNotification(${n.place_id}, ${n.comment_id || "null"}, ${n.id}, ${n.place_group_id || "null"})">
+        <div class="notif-item notif-item--unread" onclick="goToNotification(${n.place_id}, ${n.comment_id != null ? n.comment_id : "null"}, ${n.id}, ${n.place_group_id != null ? n.place_group_id : "null"}, ${n.place_lat != null ? n.place_lat : "null"}, ${n.place_lon != null ? n.place_lon : "null"})">
           <div class="notif-text">${typeText}</div>
           <div class="notif-time">${timeAgo(n.created_at)}</div>
         </div>
@@ -3906,7 +4079,7 @@ async function markAllNotificationsRead() {
 }
 
 /** Перейти к точке из уведомления */
-async function goToNotification(placeId, commentId, notifId, groupId) {
+async function goToNotification(placeId, commentId, notifId, groupId, lat, lon) {
   // Помечаем прочитанным
   if (notifId) markNotificationRead(notifId);
 
@@ -3919,25 +4092,44 @@ async function goToNotification(placeId, commentId, notifId, groupId) {
   }
 
   // Перелетаем к точке
-  // CASCADE: если точка удалена → уведомление тоже удалено из БД,
-  // поэтому дополнительная проверка не нужна
   pendingPopupPlaceId = placeId;
   pendingPopupGroupId = groupId || null;
   pendingCommentId = commentId || null;
 
-  // flyTo вызовет moveend → refresh() → pendingPopupPlaceId откроет попап + комментарии
+  // Координаты: из маркера на карте или из данных уведомления
   const marker = markersByPlaceId[placeId];
+  let center;
   if (marker) {
     const lngLat = marker.getLngLat();
-    map.flyTo({ center: [lngLat.lng, lngLat.lat], zoom: Math.max(map.getZoom(), 14) });
-    // Fallback: если карта уже на месте, flyTo не вызовет moveend
-    setTimeout(() => {
-      if (pendingPopupPlaceId !== null) refresh();
-    }, 600);
+    center = [lngLat.lng, lngLat.lat];
+  } else if (lat != null && lon != null) {
+    center = [lon, lat];
   } else {
-    // Маркер не найден — обновим карту вручную
-    refresh();
+    // Нет ни маркера, ни координат — обновим карту, дадим одну попытку открыть попап;
+    // после завершения refresh сбросим pending, т.к. без flyTo повторных попыток не будет
+    refresh().finally(() => {
+      if (pendingPopupPlaceId === placeId) {
+        pendingPopupPlaceId = null;
+        pendingPopupGroupId = null;
+        pendingCommentId = null;
+      }
+    });
+    return;
   }
+
+  map.flyTo({ center, zoom: Math.max(map.getZoom(), 16) });
+  // Fallback: если карта уже на месте или перелёт долгий
+  setTimeout(() => {
+    if (pendingPopupPlaceId !== null) refresh();
+  }, 2000);
+  // Страховка: сбросить pending через 5 секунд если попап так и не открылся
+  setTimeout(() => {
+    if (pendingPopupPlaceId === placeId) {
+      pendingPopupPlaceId = null;
+      pendingPopupGroupId = null;
+      pendingCommentId = null;
+    }
+  }, 5000);
 }
 
 // ===================== Жалобы (постмодерация) =====================
@@ -4051,15 +4243,9 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// Закрытие dropdown-меню по клику вне
+// Закрытие dropdown-меню по клику вне (все dropdown теперь используют .open)
 document.addEventListener("click", (e) => {
-  document.querySelectorAll(".mm-popup-dropdown").forEach(dd => {
-    if (dd.style.display === "block" && !dd.parentElement.contains(e.target)) {
-      dd.style.display = "none";
-    }
-  });
-  // Закрываем comment-menu dropdown (используют класс open)
-  document.querySelectorAll(".comment-actions .mm-popup-dropdown.open").forEach(dd => {
+  document.querySelectorAll(".mm-popup-dropdown.open").forEach(dd => {
     if (!dd.parentElement.contains(e.target)) {
       dd.classList.remove("open");
     }

@@ -80,6 +80,8 @@ class NotificationService:
                 "place_title": place.title if place else None,
                 "place_id": notif.place_id,
                 "place_group_id": place.group_id if place else None,
+                "place_lat": float(place.lat) if place else None,
+                "place_lon": float(place.lon) if place else None,
                 "comment_id": notif.comment_id,
                 "is_read": notif.is_read,
                 "created_at": notif.created_at.isoformat() if notif.created_at else None,

@@ -356,13 +356,14 @@ html, body {
 
 .mm-popup-title {
     font-weight: 600;
+    font-size: 15px;
     margin-bottom: 6px;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
 }
 
 .mm-popup-note {
     white-space: pre-wrap;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     line-height: 1.25;
 }
 
@@ -575,10 +576,10 @@ html, body {
 /* Плашка жалобы в попапе */
 .mm-report-badge{
   margin-top:4px;
-  padding:2px 8px;
-  border-radius:9999px;
+  padding:4px 8px;
+  border-radius:6px;
   font-size:11px;
-  display:inline-block;
+  line-height:1.3;
 }
 .mm-report-badge--pending{
   background:#f3f4f6;
@@ -652,7 +653,7 @@ html, body {
   font-size:13px;
   line-height:1.4;
   white-space:pre-wrap;
-  overflow-wrap:anywhere;
+  overflow-wrap:break-word;
   color:#111827;
 }
 .comment-toggle-text{
@@ -822,7 +823,7 @@ html, body {
   font-size:13px;
   line-height:1.4;
   color:#111827;
-  overflow-wrap:anywhere;
+  overflow-wrap:break-word;
 }
 .notif-time{
   font-size:11px;
@@ -869,4 +870,43 @@ html, body {
 }
 .comment-reply-indicator button:hover{
   color:#111827;
+}
+
+/* Кластеры маркеров */
+.mm-cluster-marker{
+  background:rgba(79,70,229,0.85);
+  color:#fff;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  font-weight:600;
+  border:2px solid #fff;
+  box-shadow:0 2px 6px rgba(0,0,0,0.3);
+  cursor:pointer;
+}
+
+/* Spinner загрузки в галерее */
+.mm-gallery-spinner{
+  position:absolute;
+  top:50%;
+  left:50%;
+  margin:-16px 0 0 -16px;
+  width:32px;
+  height:32px;
+  border:3px solid rgba(255,255,255,0.3);
+  border-top-color:#fff;
+  border-radius:50%;
+  animation:mm-spin 0.6s linear infinite;
+}
+@keyframes mm-spin{ to{ transform:rotate(360deg); } }
+.mm-gallery-error{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  color:rgba(255,255,255,0.7);
+  font-size:16px;
+  text-align:center;
 }
