@@ -18,6 +18,8 @@ let outgoingPendingIds = new Set();
 // Layers UI state
 let selectedGroupLayerIds = new Set(); // group_id for personal/shared layers (not public=1)
 let personalGroupId = null;
+let layersFloatingControl = null;
+let _prevFloatingLayersHtml = "";
 
 async function apiFetch(path, { method = "GET", headers = {}, body = null } = {}) {
   const h = { ...headers };
@@ -121,6 +123,12 @@ function applyAuthUI(isAuthed) {
   const tgStatus = document.getElementById("tg-status");
   if (!isAuthed) {
     if (tgStatus) tgStatus.innerText = "";
+  }
+
+  // Плавающая кнопка слоёв — показывать только залогиненным
+  if (layersFloatingControl) {
+    if (isAuthed) layersFloatingControl.show();
+    else layersFloatingControl.hide();
   }
 }
 
@@ -756,8 +764,10 @@ function uiLogout() {
   _prevBlockedHtml = "";
   _prevGroupLayersHtml = "";
   _prevGroupSelectHtml = "";
+  _prevFloatingLayersHtml = "";
   selectedGroupLayerIds.clear();
   personalGroupId = null;
+  layersFloatingControl?.hide();
 
   // вернуть верхнюю надпись
   const userTitle = document.getElementById("user-title");
@@ -1042,7 +1052,7 @@ function renderGroupLayersUI() {
     parts.push(
       `<div class="layer-row">
         <div class="left">
-          <input type="checkbox" ${checked} onchange="toggleGroupLayer(${personalGroupId}, this.checked)">
+          <input type="checkbox" data-group-id="${personalGroupId}" ${checked} onchange="toggleGroupLayer(${personalGroupId}, this.checked)">
           <div>
             <div class="name">Личная карта</div>
             <div class="meta">только вы</div>
@@ -1066,7 +1076,7 @@ function renderGroupLayersUI() {
     parts.push(
       `<div class="layer-row">
         <div class="left">
-          <input type="checkbox" ${checked} onchange="toggleGroupLayer(${g.id}, this.checked)">
+          <input type="checkbox" data-group-id="${g.id}" ${checked} onchange="toggleGroupLayer(${g.id}, this.checked)">
           <div style="min-width:0;">
             <div class="name">${name}</div>
             <div class="meta">${escapeHtml(visibility)}${role ? ` • ${escapeHtml(role)}` : ""}</div>
@@ -1084,11 +1094,13 @@ function renderGroupLayersUI() {
     listEl.innerHTML = newHtml;
     _prevGroupLayersHtml = newHtml;
   }
+  renderFloatingLayersContent();
 }
 
 function toggleGroupLayer(groupId, isChecked) {
   if (isChecked) selectedGroupLayerIds.add(groupId);
   else selectedGroupLayerIds.delete(groupId);
+  renderFloatingLayersContent();
   refresh();
 }
 
@@ -1534,6 +1546,7 @@ function toggleFriendMenu(btn, event) {
 // Закрытие comment-dropdown при ресайзе окна
 window.addEventListener("resize", () => {
   document.querySelectorAll(".comment-actions .mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+  layersFloatingControl?.close();
 });
 
 // Закрытие popup-меню, редактирования и модалки комментариев по Escape
@@ -1547,6 +1560,11 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    // Приоритет 0.5: закрываем floating layers dropdown
+    if (layersFloatingControl?.isOpen()) {
+      layersFloatingControl.close();
+      return;
+    }
     // Приоритет 1: закрываем все dropdown-меню (report + comment)
     const openDropdowns = document.querySelectorAll(".mm-popup-dropdown.open");
     if (openDropdowns.length) {
@@ -1582,6 +1600,10 @@ document.addEventListener("keydown", (e) => {
 
 // Закрытие popup-меню при клике вне
 document.addEventListener("click", (e) => {
+  // Закрытие floating layers dropdown при клике вне
+  if (layersFloatingControl?.isOpen() && !e.target.closest(".mm-layers-float")) {
+    layersFloatingControl.close();
+  }
   if (e.target.closest(".mm-popup-dropdown")) return;
   document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
 
@@ -2325,7 +2347,146 @@ refresh();
 }
 
 function onLayerChange() {
+renderFloatingLayersContent();
 refresh();
+}
+
+// ===== Плавающая кнопка слоёв на карте (IControl) =====
+
+class LayersFloatingControl {
+  onAdd() {
+    this._container = document.createElement("div");
+    this._container.className = "mm-layers-float maplibregl-ctrl";
+    this._container.style.display = "none"; // скрыт до логина
+
+    // Кнопка (SVG — Lucide «layers»)
+    this._btn = document.createElement("button");
+    this._btn.className = "mm-layers-float-btn";
+    this._btn.type = "button";
+    this._btn.title = "Слои";
+    this._btn.innerHTML =
+      '<svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5z"/>' +
+      '<path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>';
+
+    // Dropdown
+    this._dropdown = document.createElement("div");
+    this._dropdown.className = "mm-layers-float-dropdown";
+
+    this._container.appendChild(this._btn);
+    this._container.appendChild(this._dropdown);
+
+    // Клик по кнопке — toggle dropdown
+    this._btn.addEventListener("click", (e) => {
+      // Закрываем другие открытые menus перед stopPropagation
+      document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+      e.stopPropagation();
+      if (this.isOpen()) this.close();
+      else this.open();
+    });
+
+    // Остановка propagation внутри dropdown (чтобы глобальный click-handler не закрывал)
+    // Но закрываем другие открытые menus (report/comment dropdown)
+    this._dropdown.addEventListener("click", (e) => {
+      document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+      e.stopPropagation();
+    });
+
+    // Change handler — event delegation на чекбоксах
+    this._dropdown.addEventListener("change", (e) => {
+      const cb = e.target;
+      if (!cb.matches("input[type=checkbox]")) return;
+
+      if (cb.dataset.floatLayer === "public") {
+        const el = document.getElementById("layer-public");
+        if (el) el.checked = cb.checked;
+      } else if (cb.dataset.floatLayer === "my") {
+        const el = document.getElementById("layer-my");
+        if (el) el.checked = cb.checked;
+      } else if (cb.dataset.floatGroup) {
+        const gid = Number(cb.dataset.floatGroup);
+        if (cb.checked) selectedGroupLayerIds.add(gid);
+        else selectedGroupLayerIds.delete(gid);
+        // Синхронизация sidebar checkbox
+        const sbCb = document.querySelector(
+          `#group-layers-list input[data-group-id="${gid}"]`
+        );
+        if (sbCb) sbCb.checked = cb.checked;
+      }
+      // Обновить _prevFloatingLayersHtml без innerHTML (защита от мерцания при setInterval)
+      _prevFloatingLayersHtml = buildFloatingLayersHtml();
+      refresh();
+    });
+
+    // Остановка wheel/touch propagation (чтобы скролл dropdown не зумил/панорамировал карту)
+    this._dropdown.addEventListener("wheel", (e) => e.stopPropagation());
+    this._dropdown.addEventListener("touchmove", (e) => e.stopPropagation(), { passive: true });
+
+    return this._container;
+  }
+
+  onRemove() {
+    this._container.parentNode?.removeChild(this._container);
+  }
+
+  isOpen() { return this._dropdown.classList.contains("open"); }
+
+  open() {
+    renderFloatingLayersContent(true);
+    this._dropdown.classList.add("open");
+  }
+
+  close() { this._dropdown.classList.remove("open"); }
+
+  show() { this._container.style.display = ""; }
+
+  hide() {
+    this.close();
+    this._container.style.display = "none";
+  }
+}
+
+/** Чистая функция — генерирует HTML содержимого floating dropdown слоёв */
+function buildFloatingLayersHtml() {
+  const pubChecked = document.getElementById("layer-public")?.checked;
+  const myChecked = document.getElementById("layer-my")?.checked;
+  const groups = (currentUser && Array.isArray(currentUser.groups)) ? currentUser.groups : [];
+
+  let html = '<div class="mm-layers-float-section">Публичные</div>';
+  html += `<label class="mm-layers-float-item">
+    <input type="checkbox" data-float-layer="public"${pubChecked ? " checked" : ""}> Все точки
+  </label>`;
+  html += `<label class="mm-layers-float-item">
+    <input type="checkbox" data-float-layer="my"${myChecked ? " checked" : ""}> Мои точки
+  </label>`;
+
+  // Личная карта + групповые слои (сортировка по ID — как в sidebar)
+  const layerGroups = groups
+    .filter(g => g && g.id && g.visibility !== "public" && g.id !== 1)
+    .sort((a, b) => (a.id || 0) - (b.id || 0));
+
+  if (layerGroups.length > 0) {
+    html += '<div class="mm-layers-float-divider"></div>';
+    html += '<div class="mm-layers-float-section">Личные и групповые</div>';
+    for (const g of layerGroups) {
+      const checked = selectedGroupLayerIds.has(g.id) ? " checked" : "";
+      const isPersonal = personalGroupId && g.id === personalGroupId;
+      const name = isPersonal ? "Личная карта" : escapeHtml(g.name || `Слой ${g.id}`);
+      html += `<label class="mm-layers-float-item">
+        <input type="checkbox" data-float-group="${g.id}"${checked}> ${name}
+      </label>`;
+    }
+  }
+
+  return html;
+}
+
+/** Применяет HTML к dropdown (с diff-защитой от мерцания) */
+function renderFloatingLayersContent(force) {
+  if (!layersFloatingControl) return;
+  const html = buildFloatingLayersHtml();
+  if (!force && html === _prevFloatingLayersHtml) return;
+  layersFloatingControl._dropdown.innerHTML = html;
+  _prevFloatingLayersHtml = html;
 }
 
 const map = new maplibregl.Map({
@@ -2358,7 +2519,10 @@ center: [37.6176, 55.7558],
 zoom: 10
 });
 
-map.addControl(new maplibregl.NavigationControl(), "top-right");
+// Оба контрола в bottom-right: сначала zoom (у угла), потом слои (над ним)
+map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+layersFloatingControl = new LayersFloatingControl();
+map.addControl(layersFloatingControl, "bottom-right");
 
 map.on("contextmenu", (e) => {
   if (e.originalEvent && e.originalEvent.preventDefault) {

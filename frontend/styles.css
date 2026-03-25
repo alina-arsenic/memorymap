@@ -910,3 +910,79 @@ html, body {
   font-size:16px;
   text-align:center;
 }
+
+/* ===== Плавающая кнопка слоёв на карте ===== */
+.mm-layers-float{
+  position:relative;
+}
+.mm-layers-float-btn{
+  width:29px;
+  height:29px;
+  padding:0;
+  border:none;
+  background:#fff;
+  border-radius:4px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow:0 0 0 2px rgba(0,0,0,0.1);
+}
+.mm-layers-float-btn:hover{
+  background:#f3f4f6;
+}
+.mm-layers-float-btn svg{
+  width:17px;
+  height:17px;
+  stroke:#333;
+  fill:none;
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.mm-layers-float-dropdown{
+  display:none;
+  position:absolute;
+  bottom:calc(100% + 6px);
+  right:0;
+  min-width:220px;
+  max-height:min(320px, 50vh);
+  overflow-y:auto;
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.15);
+  z-index:100;
+  padding:6px 0;
+}
+.mm-layers-float-dropdown.open{
+  display:block;
+}
+.mm-layers-float-section{
+  padding:4px 12px 2px;
+  font-size:11px;
+  font-weight:600;
+  text-transform:uppercase;
+  color:#6b7280;
+  letter-spacing:0.04em;
+}
+.mm-layers-float-divider{
+  height:1px;
+  background:#e5e7eb;
+  margin:4px 0;
+}
+.mm-layers-float-item{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 12px;
+  font-size:13px;
+  cursor:pointer;
+}
+.mm-layers-float-item:hover{
+  background:#f9fafb;
+}
+.mm-layers-float-item input[type="checkbox"]{
+  margin:0;
+  flex-shrink:0;
+}
