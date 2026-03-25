@@ -23,22 +23,23 @@ let _prevFloatingLayersHtml = "";
 
 async function apiFetch(path, { method = "GET", headers = {}, body = null } = {}) {
   const h = { ...headers };
-  if (accessToken) h["Authorization"] = "Bearer " + accessToken;
+  // C5: сохраняем токен, использованный для запроса
+  const usedToken = accessToken;
+  if (usedToken) h["Authorization"] = "Bearer " + usedToken;
 
   const resp = await fetch(`${API_BASE}${path}`, { method, headers: h, body });
 
   // если токен протух/невалидный - сразу разлогиниваемся
   if (resp.status === 401) {
+    // C5: если токен уже сменился (re-login) — не logout'ить
+    if (accessToken && accessToken !== usedToken) return resp;
+
     accessToken = null;
     currentUser = null;
     localStorage.removeItem(LS_TOKEN);
-
-    // UI гость
-    const userTitle = document.getElementById("user-title");
-    if (userTitle) userTitle.innerText = "Пользователь";
     applyAuthUI(false);
 
-    // на всякий: убираем временный маркер
+    // убираем временный маркер
     if (tempMarker) { tempMarker.remove(); tempMarker = null; }
     tempCoords = null;
   }
@@ -47,7 +48,7 @@ async function apiFetch(path, { method = "GET", headers = {}, body = null } = {}
 }
 
 function createPin(isMine, overrideColor) {
-const color = overrideColor || (isMine ? "#10b981" : "#3b82f6"); // зеленый свои, синий чужие
+const color = overrideColor || (isMine ? "#5B5BF5" : "#1B6B52"); // синий свои, тил чужие
 
 const svg = `
     <svg width="20" height="35" viewBox="0 0 26 40" xmlns="http://www.w3.org/2000/svg">
@@ -94,34 +95,151 @@ function showForgotPasswordForm() {
   if (status) status.innerText = "";
 }
 
+// ========= Auth modal (Фаза 2) =========
+
+/** Открыть модалку авторизации на нужной форме */
+function openAuthModal(formName) {
+  const overlay = document.getElementById("auth-modal-overlay");
+  if (!overlay) return;
+
+  // C9: если есть pending reset email — восстановить forgot-reset-form
+  if (formName === "login" && _pendingResetEmail) {
+    _hideAllGuestForms();
+    const resetForm = document.getElementById("forgot-reset-form");
+    if (resetForm) resetForm.style.display = "";
+  } else if (formName === "login") {
+    showLoginForm();
+  } else if (formName === "register") {
+    showRegisterForm();
+  }
+
+  overlay.style.display = "";
+
+  // W3: показать/скрыть крестик (скрыт на шаге verify)
+  _updateAuthModalCloseBtn();
+
+  // Автофокус на поле ввода
+  requestAnimationFrame(() => {
+    let input;
+    if (formName === "register") {
+      input = document.getElementById("reg-login-input");
+    } else {
+      input = document.getElementById("login-input");
+    }
+    if (input) input.focus();
+  });
+}
+
+/** Закрыть модалку авторизации */
+function closeAuthModal() {
+  const overlay = document.getElementById("auth-modal-overlay");
+  if (!overlay) return;
+  // W3: не закрывать если verify-form видим
+  const verifyForm = document.getElementById("verify-form");
+  if (verifyForm && verifyForm.style.display !== "none") return;
+  overlay.style.display = "none";
+}
+
+/** Закрытие по клику на overlay */
+function closeAuthModalOnOverlay(e) {
+  if (e.target !== e.currentTarget) return;
+  // W3: не закрывать при verify
+  const verifyForm = document.getElementById("verify-form");
+  if (verifyForm && verifyForm.style.display !== "none") return;
+  closeAuthModal();
+}
+
+/** Обновить видимость крестика модалки */
+function _updateAuthModalCloseBtn() {
+  const closeBtn = document.getElementById("auth-modal-close-btn");
+  const verifyForm = document.getElementById("verify-form");
+  if (closeBtn) {
+    closeBtn.style.display =
+      (verifyForm && verifyForm.style.display !== "none") ? "none" : "";
+  }
+}
+
+// ========= Header dropdown =========
+
+function toggleHeaderDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById("header-dropdown");
+  if (dd) dd.classList.toggle("open");
+}
+
+function closeHeaderDropdown() {
+  const dd = document.getElementById("header-dropdown");
+  if (dd) dd.classList.remove("open");
+}
+
+// ========= Sidebar tabs (Фаза 3) =========
+
+let _currentTab = "layers";
+
+function switchTab(tabName) {
+  _currentTab = tabName;
+
+  // Обновить кнопки табов
+  const tabs = document.querySelectorAll(".sidebar-tab");
+  tabs.forEach(t => {
+    if (t.dataset.tab === tabName) t.classList.add("active");
+    else t.classList.remove("active");
+  });
+
+  // Показать/скрыть контент табов
+  const contents = ["tab-layers", "tab-friends", "tab-place", "tab-moderation"];
+  for (const id of contents) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.style.display = id === "tab-" + tabName ? "" : "none";
+  }
+
+  // W7: закрыть все dropdown при переключении
+  document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+
+  // W6: автообновление при переходе на таб модерации
+  if (tabName === "moderation") loadModerationQueue();
+}
+
 function applyAuthUI(isAuthed) {
-  const logoutBtn = document.getElementById("logout-btn");
   const authedOnly = document.getElementById("authed-only");
+  const appEl = document.querySelector(".app");
+  const guestActions = document.getElementById("header-guest-actions");
+  const userSection = document.getElementById("header-user-section");
 
   if (isAuthed) {
-    _hideAllGuestForms();
+    // Скрыть гостевые кнопки, показать юзер-секцию header
+    if (guestActions) guestActions.style.display = "none";
+    if (userSection) userSection.style.display = "";
+    // Убрать guest-mode с .app и html (FOUC)
+    if (appEl) appEl.classList.remove("guest-mode");
+    document.documentElement.classList.remove("guest-mode");
+    // Показать authed-only (sidebar контент)
+    if (authedOnly) authedOnly.style.display = "";
+    // C19: закрыть auth-модалку после успешного логина
+    closeAuthModal();
   } else {
-    showLoginForm();
-  }
-  const accountActions = document.getElementById("account-actions");
-  if (logoutBtn) logoutBtn.style.display = isAuthed ? "" : "none";
-  if (accountActions) accountActions.style.display = isAuthed ? "" : "none";
-  if (authedOnly) authedOnly.style.display = isAuthed ? "" : "none";
+    // Показать гостевые кнопки, скрыть юзер-секцию
+    if (guestActions) guestActions.style.display = "";
+    if (userSection) userSection.style.display = "none";
+    // Добавить guest-mode
+    if (appEl) appEl.classList.add("guest-mode");
+    document.documentElement.classList.add("guest-mode");
+    // Скрыть authed-only
+    if (authedOnly) authedOnly.style.display = "none";
 
-  const notifBtn = document.getElementById("notif-btn");
-  const notifBadge = document.getElementById("notif-badge");
-  if (notifBtn) notifBtn.style.display = isAuthed ? "" : "none";
-  if (!isAuthed) {
+    // Сбрасываем header notif badge
+    const notifBtn = document.getElementById("header-notif-btn");
+    const notifBadge = document.getElementById("header-notif-badge");
+    if (notifBtn) notifBtn.style.display = "none";
     if (notifBadge) { notifBadge.innerText = "0"; notifBadge.style.display = "none"; }
     closeFriendRequestsModal(true);
 
-    // закрываем модал настроек при logout
-    const settingsOverlay = document.getElementById("account-settings-overlay");
-    if (settingsOverlay) settingsOverlay.style.display = "none";
-  }
+    // W8: закрываем settings overlay при logout
+    closeSettingsOverlay(true);
 
-  const tgStatus = document.getElementById("tg-status");
-  if (!isAuthed) {
+    // Сбрасываем TG-статус
+    const tgStatus = document.getElementById("tg-status");
     if (tgStatus) tgStatus.innerText = "";
   }
 
@@ -129,6 +247,11 @@ function applyAuthUI(isAuthed) {
   if (layersFloatingControl) {
     if (isAuthed) layersFloatingControl.show();
     else layersFloatingControl.hide();
+  }
+
+  // C1: map.resize() после смены layout
+  if (typeof map !== "undefined" && map && map.resize) {
+    requestAnimationFrame(() => map.resize());
   }
 }
 
@@ -181,17 +304,32 @@ function mmModalSave() {
 }
 
 async function initAuthFromStorage() {
-  applyAuthUI(false);
-
   const saved = localStorage.getItem(LS_TOKEN);
-  if (!saved) return;
+  // C7: если нет токена — сразу guest mode (без мерцания, класс уже на html)
+  if (!saved) {
+    applyAuthUI(false);
+    // C14: если pathname /settings без токена — redirect на /
+    if (location.pathname === "/settings") {
+      history.replaceState(null, "", "/");
+      openAuthModal("login");
+    }
+    return;
+  }
 
   accessToken = saved;
+  // C7: НЕ вызываем applyAuthUI(false) — чтобы залогиненный не видел мерцание guest→authed
   await loadMe();
+
+  // Фаза 4: если URL = /settings и мы залогинены — открыть settings overlay
+  if (location.pathname === "/settings" && accessToken) {
+    // C11: подготовить history для корректного Back
+    history.replaceState(null, "", "/");
+    history.pushState({ page: "settings" }, "", "/settings");
+    openSettingsOverlay(true); // silent=true — не pushState повторно
+  }
 }
 
 async function loadMe() {
-  const userTitle = document.getElementById("user-title");
   const tgBtn = document.getElementById("tg-link-btn");
   const tgHint = document.getElementById("tg-hint");
   const tgStatus = document.getElementById("tg-status");
@@ -200,7 +338,6 @@ async function loadMe() {
   // если токена нет - сразу UI в гостя
   if (!accessToken) {
     currentUser = null;
-    if (userTitle) userTitle.innerText = "Пользователь";
     applyAuthUI(false);
 
     if (tgStatus) tgStatus.innerText = "";
@@ -217,8 +354,6 @@ async function loadMe() {
     accessToken = null;
     currentUser = null;
     localStorage.removeItem(LS_TOKEN);
-
-    if (userTitle) userTitle.innerText = "Пользователь";
     applyAuthUI(false);
 
     if (tgStatus) tgStatus.innerText = "";
@@ -232,33 +367,45 @@ async function loadMe() {
   currentUser = await resp.json();
   const nick = currentUser.login || ("user#" + currentUser.id);
 
-  // показываем роль для admin и moderator
-  const roleBadge = currentUser.role === "admin" ? " (Админ)"
-    : currentUser.role === "moderator" ? " (Модератор)" : "";
-  if (userTitle) userTitle.innerText = `Привет, ${nick}!${roleBadge}`;
+  // Header: имя юзера и badge роли
+  const headerUsername = document.getElementById("header-username");
+  const headerRoleBadge = document.getElementById("header-role-badge");
+  if (headerUsername) headerUsername.innerText = nick;
+  if (headerRoleBadge) {
+    if (currentUser.role === "admin") {
+      headerRoleBadge.innerText = "Админ";
+      headerRoleBadge.style.display = "";
+    } else if (currentUser.role === "moderator") {
+      headerRoleBadge.innerText = "Модератор";
+      headerRoleBadge.style.display = "";
+    } else {
+      headerRoleBadge.style.display = "none";
+    }
+  }
+
   applyAuthUI(true);
 
   // Telegram UI
   if (currentUser.tg_id) {
     if (tgStatus) tgStatus.innerText = currentUser.username
-      ? `Привязан Telegram: @${currentUser.username}`
-      : `Привязан Telegram ID: ${currentUser.tg_id}`;
+      ? `Подключён: @${currentUser.username}`
+      : `Подключён (ID: ${currentUser.tg_id})`;
     if (tgBtn) tgBtn.style.display = "none";
     if (tgHint) tgHint.style.display = "none";
     if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
   } else {
-    if (tgStatus) tgStatus.innerText = "Telegram не привязан.";
-    if (tgBtn) tgBtn.style.display = "";
+    if (tgStatus) tgStatus.innerText = "Не подключён";
+    // не показываем кнопку если уже идёт процесс привязки (код сгенерирован)
+    const linkingInProgress = tgCode && tgCode.style.display !== "none" && tgCode.innerHTML.trim() !== "";
+    if (tgBtn && !linkingInProgress) tgBtn.style.display = "";
     if (tgHint) tgHint.style.display = "";
   }
 
-  // Панель модерации — показываем только admin и moderator
-  const modPanel = document.getElementById("moderation-panel");
-  if (modPanel) {
-    const isModerator = currentUser.role === "admin" || currentUser.role === "moderator";
-    modPanel.style.display = isModerator ? "" : "none";
-    if (isModerator) loadModerationQueue();
-  }
+  // Таб модерации — показываем только admin и moderator
+  const isModerator = currentUser.role === "admin" || currentUser.role === "moderator";
+  const tabBtnMod = document.getElementById("tab-btn-moderation");
+  if (tabBtnMod) tabBtnMod.style.display = isModerator ? "" : "none";
+  if (isModerator) loadModerationQueue();
 
   // Панель администратора — показываем только admin
   const adminPanel = document.getElementById("admin-panel");
@@ -267,6 +414,9 @@ async function loadMe() {
     adminPanel.style.display = isAdmin ? "" : "none";
     if (isAdmin) loadAdminUsers();
   }
+
+  // Обновляем badge модерации
+  updateModerationBadge();
 
   // Друзья/уведомления
   refreshFriendsUI();
@@ -302,6 +452,9 @@ async function uiLogin() {
           document.getElementById("login-form").style.display = "none";
           document.getElementById("verify-form").style.display = "";
           document.getElementById("verify-email-display").innerText = _pendingVerifyEmail;
+          _updateAuthModalCloseBtn(); // W3: скрыть крестик при verify
+          // C8: сохраняем в sessionStorage
+          try { sessionStorage.setItem("mm_pendingVerifyEmail", _pendingVerifyEmail); } catch(_e) {}
           document.getElementById("verify-status").innerText =
             errData.email_sent === false
               ? "Не удалось отправить код. Нажмите «Отправить повторно»."
@@ -329,11 +482,14 @@ async function uiLogin() {
 }
 
 // email, на который отправлен код (запоминаем для verify/resend)
+// C8/C9: восстанавливаем из sessionStorage при F5
 let _pendingVerifyEmail = null;
-// email для формы сброса пароля
 let _pendingResetEmail = null;
-// email для формы смены email
 let _pendingNewEmail = null;
+try {
+  _pendingVerifyEmail = sessionStorage.getItem("mm_pendingVerifyEmail") || null;
+  _pendingResetEmail = sessionStorage.getItem("mm_pendingResetEmail") || null;
+} catch(_e) {}
 
 async function uiRegister() {
   const btn = document.querySelector("#register-form .btn-primary");
@@ -372,9 +528,12 @@ async function uiRegister() {
     }
     const regData = await resp.json();
     _pendingVerifyEmail = email;
+    // C8: сохраняем в sessionStorage
+    try { sessionStorage.setItem("mm_pendingVerifyEmail", email); } catch(_e) {}
     document.getElementById("register-form").style.display = "none";
     document.getElementById("verify-form").style.display = "";
     document.getElementById("verify-email-display").innerText = email;
+    _updateAuthModalCloseBtn(); // W3: скрыть крестик при verify
     document.getElementById("verify-status").innerText =
       regData.email_sent === false
         ? "Не удалось отправить письмо. Нажмите «Отправить повторно»."
@@ -408,9 +567,11 @@ async function uiVerifyEmail() {
       return;
     }
     _pendingVerifyEmail = null;
+    try { sessionStorage.removeItem("mm_pendingVerifyEmail"); } catch(_e) {}
     document.getElementById("verify-form").style.display = "none";
     document.getElementById("login-form").style.display = "";
     document.getElementById("verify-code-input").value = "";
+    _updateAuthModalCloseBtn(); // W3: показать крестик после verify
     alert("Email подтверждён! Теперь войдите в аккаунт.");
   } catch (e) {
     document.getElementById("verify-status").innerText = "Ошибка сети. Попробуйте ещё раз.";
@@ -469,6 +630,8 @@ async function uiForgotPassword() {
     }
     // переключаемся на форму ввода кода
     _pendingResetEmail = email;
+    // C9: сохраняем в sessionStorage
+    try { sessionStorage.setItem("mm_pendingResetEmail", email); } catch(_e) {}
     _hideAllGuestForms();
     const resetForm = document.getElementById("forgot-reset-form");
     if (resetForm) resetForm.style.display = "";
@@ -511,6 +674,7 @@ async function uiResetPassword() {
     }
     // успех — переключаемся на логин
     _pendingResetEmail = null;
+    try { sessionStorage.removeItem("mm_pendingResetEmail"); } catch(_e) {}
     document.getElementById("forgot-reset-code-input").value = "";
     document.getElementById("forgot-reset-password-input").value = "";
     showLoginForm();
@@ -522,12 +686,15 @@ async function uiResetPassword() {
   }
 }
 
-// --- Настройки аккаунта (модал) ---
+// --- Settings overlay (Фаза 4: полноэкранный SPA-оверлей) ---
 
-function openAccountSettingsModal() {
-  const overlay = document.getElementById("account-settings-overlay");
+function openSettingsOverlay(silent) {
+  // Закрываем header dropdown
+  closeHeaderDropdown();
+
+  const overlay = document.getElementById("settings-overlay");
   if (!overlay) return;
-  overlay.style.display = "flex";
+  overlay.style.display = "";
 
   // заполняем текущие данные
   const loginEl = document.getElementById("settings-current-login");
@@ -535,13 +702,8 @@ function openAccountSettingsModal() {
   if (loginEl) loginEl.innerText = (currentUser && currentUser.login) || "—";
   if (emailEl) emailEl.innerText = (currentUser && currentUser.email) || "не указан";
 
-  // сбрасываем все секции
-  for (const name of ["login", "email", "password"]) {
-    const body = document.getElementById("settings-body-" + name);
-    const toggle = document.getElementById("settings-toggle-" + name);
-    if (body) body.style.display = "none";
-    if (toggle) toggle.innerText = "▸";
-  }
+  // сбрасываем секции и показываем первую (telegram)
+  toggleSettingsSection("telegram");
   // сбрасываем поля
   const fields = ["settings-new-login", "settings-new-email", "settings-email-code",
     "settings-old-password", "settings-new-password"];
@@ -560,34 +722,51 @@ function openAccountSettingsModal() {
   if (step1) step1.style.display = "";
   if (step2) step2.style.display = "none";
   _pendingNewEmail = null;
+
+  // C6: pushState только если pathname !== "/settings"
+  if (!silent) {
+    if (location.pathname !== "/settings") {
+      history.pushState({ page: "settings" }, "", "/settings");
+    }
+  }
 }
 
-function closeAccountSettingsModal() {
-  const overlay = document.getElementById("account-settings-overlay");
-  if (overlay) overlay.style.display = "none";
+function closeSettingsOverlay(silent) {
+  const overlay = document.getElementById("settings-overlay");
+  if (!overlay || overlay.style.display === "none") return;
+  overlay.style.display = "none";
+
+  // C6: history.back() чтобы не стекать pushState
+  if (!silent && location.pathname === "/settings") {
+    history.back();
+  }
 }
 
-function closeAccountSettingsModalOnOverlay(e) {
-  if (e.target === e.currentTarget) closeAccountSettingsModal();
-}
+// popstate handler — Back кнопка закрывает settings
+window.addEventListener("popstate", () => {
+  if (location.pathname !== "/settings") {
+    const overlay = document.getElementById("settings-overlay");
+    if (overlay) overlay.style.display = "none";
+  } else {
+    // Если мы вернулись на /settings (Forward), откроем overlay
+    if (accessToken) openSettingsOverlay(true);
+  }
+});
 
 function toggleSettingsSection(name) {
-  const body = document.getElementById("settings-body-" + name);
-  const toggle = document.getElementById("settings-toggle-" + name);
-  if (!body) return;
-  const isOpen = body.style.display !== "none";
-  // сворачиваем все
-  for (const n of ["login", "email", "password"]) {
+  const sections = ["login", "email", "password", "telegram", "delete"];
+  // скрываем все панели, убираем active со всех пунктов
+  for (const n of sections) {
     const b = document.getElementById("settings-body-" + n);
-    const t = document.getElementById("settings-toggle-" + n);
     if (b) b.style.display = "none";
-    if (t) t.innerText = "▸";
+    const nav = document.querySelector(`.settings-nav-item[data-section="${n}"]`);
+    if (nav) nav.classList.remove("active");
   }
-  // если была закрыта — открываем
-  if (!isOpen) {
-    body.style.display = "";
-    if (toggle) toggle.innerText = "▾";
-  }
+  // показываем выбранную
+  const body = document.getElementById("settings-body-" + name);
+  const nav = document.querySelector(`.settings-nav-item[data-section="${name}"]`);
+  if (body) body.style.display = "";
+  if (nav) nav.classList.add("active");
 }
 
 // --- F4: Сменить логин ---
@@ -619,10 +798,8 @@ async function uiChangeLogin() {
     }
     // обновляем UI без перезагрузки
     currentUser.login = newLogin;
-    const userTitle = document.getElementById("user-title");
-    const roleBadge = currentUser.role === "admin" ? " (Админ)"
-      : currentUser.role === "moderator" ? " (Модератор)" : "";
-    if (userTitle) userTitle.innerText = `Привет, ${newLogin}!${roleBadge}`;
+    const headerUsername = document.getElementById("header-username");
+    if (headerUsername) headerUsername.innerText = newLogin;
     document.getElementById("settings-current-login").innerText = newLogin;
     document.getElementById("settings-new-login").value = "";
     statusEl.innerText = "Логин изменён.";
@@ -668,7 +845,7 @@ async function uiChangePassword() {
       accessToken = data.access_token;
       localStorage.setItem(LS_TOKEN, accessToken);
     }
-    closeAccountSettingsModal();
+    closeSettingsOverlay();
     alert("Пароль изменён.");
   } catch (e) {
     statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
@@ -747,7 +924,7 @@ async function uiChangeEmailConfirm() {
     // обновляем email в UI
     if (_pendingNewEmail && currentUser) currentUser.email = _pendingNewEmail;
     _pendingNewEmail = null;
-    closeAccountSettingsModal();
+    closeSettingsOverlay();
     alert("Email изменён.");
   } catch (e) {
     statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
@@ -769,9 +946,21 @@ function uiLogout() {
   personalGroupId = null;
   layersFloatingControl?.hide();
 
-  // вернуть верхнюю надпись
-  const userTitle = document.getElementById("user-title");
-  if (userTitle) userTitle.innerText = "Пользователь";
+  // C18: сброс pending-переменных
+  pendingPopupPlaceId = null;
+  pendingPopupGroupId = null;
+  pendingCommentId = null;
+  outgoingPendingIds = new Set();
+  _adminUsersList = null;
+
+  // C12: сброс таба на «Слои»
+  _currentTab = "layers";
+  switchTab("layers");
+
+  // Закрыть все overlays
+  closeAuthModal();
+  closeSettingsOverlay(true);
+  closeHeaderDropdown();
 
   // UI гость
   applyAuthUI(false);
@@ -886,11 +1075,14 @@ async function confirmDeleteAccount() {
   }
 }
 
+let _linkingTelegram = false;
 async function startTelegramLink() {
+  if (_linkingTelegram) return;
   if (!accessToken) {
     alert("Сначала войдите.");
     return;
   }
+  _linkingTelegram = true;
 
   const tgCode = document.getElementById("tg-link-code");
   if (tgCode) {
@@ -909,16 +1101,23 @@ async function startTelegramLink() {
 
     const data = await resp.json();
 
+    // скрываем кнопку «Подключить» — вместо неё покажем ссылку на бота
+    const tgBtn = document.getElementById("tg-link-btn");
+    if (tgBtn) tgBtn.style.display = "none";
+
     // deep link — кликабельная кнопка-ссылка на бота
     if (tgCode) {
       if (data.bot_link) {
+        // вытаскиваем @username бота из ссылки t.me/BotName?start=...
+        const botName = data.bot_link.match(/t\.me\/([^?/]+)/)?.[1] || "";
         tgCode.innerHTML =
-          `<a href="${data.bot_link}" target="_blank" class="btn btn-primary" ` +
+          `<a href="${escapeHtml(data.bot_link)}" target="_blank" class="btn btn-primary" ` +
           `style="display:inline-block;text-decoration:none;margin-top:4px;">` +
-          `Открыть бота и привязать</a>` +
-          `<div class="hint" style="margin-top:4px;">Или отправьте боту: /link ${data.code}</div>`;
+          `Открыть бота в Telegram</a>` +
+          `<div class="hint" style="margin-top:6px;">Или отправьте команду <b>/link ${escapeHtml(data.code)}</b> боту ` +
+          `<a href="https://t.me/${escapeHtml(botName)}" target="_blank" style="color:#2ECC71;">@${escapeHtml(botName)}</a></div>`;
       } else {
-        tgCode.innerText = `Отправьте боту:\n/link ${data.code}`;
+        tgCode.innerText = `Отправьте команду /link ${data.code} боту в Telegram`;
       }
     }
 
@@ -926,13 +1125,18 @@ async function startTelegramLink() {
     let attempts = 30;
     const timer = setInterval(async () => {
       attempts--;
+      if (!accessToken) { clearInterval(timer); _linkingTelegram = false; return; }
       await loadMe();
-      if (currentUser?.tg_id || attempts <= 0) clearInterval(timer);
+      if (currentUser?.tg_id || attempts <= 0) {
+        clearInterval(timer);
+        _linkingTelegram = false;
+      }
     }, 2000);
 
   } catch (e) {
     console.error(e);
     if (tgCode) tgCode.innerText = "Ошибка сети при генерации кода.";
+    _linkingTelegram = false;
   }
 }
 
@@ -940,7 +1144,8 @@ async function startTelegramLink() {
 // -------------------- FRIENDS UI --------------------
 
 function updateNotifBadge() {
-  const badge = document.getElementById("notif-badge");
+  const badge = document.getElementById("header-notif-badge");
+  const btn = document.getElementById("header-notif-btn");
   if (!badge) return;
 
   const fr = (currentUser && typeof currentUser.friend_requests_inbox_count === "number")
@@ -953,6 +1158,18 @@ function updateNotifBadge() {
 
   badge.innerText = String(n);
   badge.style.display = n > 0 ? "" : "none";
+  // Показываем кнопку колокольчика всегда для залогиненных
+  if (btn) btn.style.display = currentUser ? "" : "none";
+}
+
+/** Обновить badge модерации на табе */
+function updateModerationBadge() {
+  const badge = document.getElementById("moderation-badge");
+  if (!badge) return;
+  const count = (currentUser && typeof currentUser.moderation_pending_count === "number")
+    ? currentUser.moderation_pending_count : 0;
+  badge.innerText = String(count);
+  badge.style.display = count > 0 ? "" : "none";
 }
 
 // Сохранённые копии последнего сгенерированного HTML — сравниваем с ними,
@@ -1182,7 +1399,7 @@ function openCreateLayerModal() {
     <input id="layer-create-name" class="input" placeholder="Например: Поездки" />
 
     <div class="field-label" style="margin-top:10px;">Добавить редакторов (друзья)</div>
-    <div style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:14px;padding:8px;">
+    <div style="max-height:220px;overflow:auto;border:1px solid #D6CFC5;border-radius:14px;padding:8px;">
       ${friendsHtml}
     </div>
 
@@ -1299,7 +1516,6 @@ async function openEditLayerModal(groupId) {
         <div class="list-item" style="align-items:center;">
           <div class="meta">
             <div class="title">${label}</div>
-            <div class="sub">role: ${escapeHtml(role)}</div>
           </div>
           <div class="actions" style="display:flex;gap:6px;align-items:center;">
             ${roleControl}
@@ -1353,7 +1569,6 @@ async function openEditLayerModal(groupId) {
         </select>
         <button class="btn btn-primary" onclick="sendLayerInvite(${groupId})" ${addable.length ? "" : "disabled"}>Пригласить</button>
       </div>
-      <div class="hint" style="margin-top:6px;">Приглашать можно только друзей.</div>
       ${pendingInvitesHtml}
     ` : `
       <div class="hint" style="margin-top:10px;">Управлять участниками может только владелец слоя.</div>
@@ -1374,11 +1589,9 @@ async function openEditLayerModal(groupId) {
       ${isPersonal ? `<div class="hint" style="margin-top:10px;">Личный слой не поддерживает совместное редактирование.</div>` : addSection}
       <div id="layer-edit-status" class="hint" style="margin-top:10px;"></div>
       <div class="divider" style="margin:12px 0;"></div>
-      <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;">
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
         ${(!isPersonal && !isOwner) ? `<button class="btn" onclick="leaveLayer(${groupId})">Выйти из слоя</button>` : ``}
-        <div style="display:flex;gap:8px;margin-left:auto;">
-          ${(!isPersonal && isOwner) ? `<button class="btn btn-danger" onclick="deleteLayer(${groupId})">Удалить слой</button>` : ``}
-        </div>
+        ${(!isPersonal && isOwner) ? `<button class="btn btn-danger" onclick="deleteLayer(${groupId})">Удалить слой</button>` : ``}
       </div>
 
     `);
@@ -1549,7 +1762,7 @@ window.addEventListener("resize", () => {
   layersFloatingControl?.close();
 });
 
-// Закрытие popup-меню, редактирования и модалки комментариев по Escape
+// Закрытие по Escape — полная цепочка приоритетов (W1)
 document.addEventListener("keydown", (e) => {
   // Приоритет 0: фото-галерея (Escape/стрелки)
   if (_galleryState) {
@@ -1560,18 +1773,24 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
-    // Приоритет 0.5: закрываем floating layers dropdown
+    // Приоритет 1: floating layers dropdown
     if (layersFloatingControl?.isOpen()) {
       layersFloatingControl.close();
       return;
     }
-    // Приоритет 1: закрываем все dropdown-меню (report + comment)
+    // Приоритет 2: header dropdown
+    const headerDD = document.getElementById("header-dropdown");
+    if (headerDD && headerDD.classList.contains("open")) {
+      closeHeaderDropdown();
+      return;
+    }
+    // Приоритет 3: popup dropdown-меню (report + comment + friends)
     const openDropdowns = document.querySelectorAll(".mm-popup-dropdown.open");
     if (openDropdowns.length) {
       openDropdowns.forEach(el => el.classList.remove("open"));
       return;
     }
-    // Приоритет 2: закрываем inline-редактирование
+    // Приоритет 4: inline-редактирование комментариев
     const editDivs = document.querySelectorAll("[id^='comment-edit-']");
     if (editDivs.length) {
       editDivs.forEach(editDiv => {
@@ -1584,22 +1803,60 @@ document.addEventListener("keydown", (e) => {
       });
       return;
     }
-    // Приоритет 3: закрываем модалку удаления аккаунта
+    // Приоритет 5: модалка удаления аккаунта (вложена в settings)
     const delOverlay = document.getElementById("delete-account-overlay");
     if (delOverlay && delOverlay.style.display !== "none") {
       closeDeleteAccountModal();
       return;
     }
-    // Приоритет 4: закрываем модалку комментариев
+    // Приоритет 6: auth-модалка (но не при verify)
+    const authOverlay = document.getElementById("auth-modal-overlay");
+    const verifyForm = document.getElementById("verify-form");
+    if (authOverlay && authOverlay.style.display !== "none") {
+      if (!verifyForm || verifyForm.style.display === "none") {
+        closeAuthModal();
+        return;
+      }
+    }
+    // Приоритет 7: settings overlay
+    const settingsOverlay = document.getElementById("settings-overlay");
+    if (settingsOverlay && settingsOverlay.style.display !== "none") {
+      closeSettingsOverlay();
+      return;
+    }
+    // Приоритет 8: модалка комментариев
     const commOverlay = document.getElementById("comments-overlay");
     if (commOverlay && commOverlay.style.display !== "none") {
       closeCommentsModal();
+      return;
+    }
+    // Приоритет 9: модалка жалобы
+    const reportOverlay = document.getElementById("report-overlay");
+    if (reportOverlay && reportOverlay.style.display !== "none") {
+      closeReportModal();
+      return;
+    }
+    // Приоритет 10: модалка слоёв
+    const layersOverlay = document.getElementById("layers-modal-overlay");
+    if (layersOverlay && layersOverlay.style.display !== "none") {
+      closeLayersModal();
+      return;
+    }
+    // Приоритет 11: модалка уведомлений
+    const frOverlay = document.getElementById("modal-overlay");
+    if (frOverlay && frOverlay.style.display !== "none") {
+      closeFriendRequestsModal();
+      return;
     }
   }
 });
 
 // Закрытие popup-меню при клике вне
 document.addEventListener("click", (e) => {
+  // Закрытие header dropdown при клике вне
+  if (!e.target.closest(".header-user-menu")) {
+    closeHeaderDropdown();
+  }
   // Закрытие floating layers dropdown при клике вне
   if (layersFloatingControl?.isOpen() && !e.target.closest(".mm-layers-float")) {
     layersFloatingControl.close();
@@ -2153,6 +2410,8 @@ async function declineGroupInvite(inviteId) {
 async function refreshUserSnapshot() {
   if (!accessToken) return;
   const resp = await apiFetch("/v1/me");
+  // W16: после await проверить что не вышли из аккаунта
+  if (!accessToken) return;
   if (!resp.ok) return;
   currentUser = await resp.json().catch(() => currentUser);
 }
@@ -2190,7 +2449,7 @@ const files = _selectedFiles.slice(); // копия массива выбран�
 if (files.length > 12) {
     if (statusEl) {
     statusEl.innerText = "Можно добавить не более 12 фотографий.";
-    statusEl.style.color = "#b91c1c";
+    statusEl.style.color = "#A33D33";
     statusEl.style.fontWeight = "600";
     }
     return;
@@ -2243,7 +2502,7 @@ const body = {
     if (!resp.ok) {
     if (statusEl) {
         statusEl.innerText = "Не удалось добавить точку (код " + resp.status + ").";
-        statusEl.style.color = "#b91c1c";
+        statusEl.style.color = "#A33D33";
         statusEl.style.fontWeight = "600";
     }
     return;
@@ -2252,7 +2511,7 @@ const body = {
     // успех
     if (statusEl) {
     statusEl.innerText = "Точка добавлена.";
-    statusEl.style.color = "#16a34a";
+    statusEl.style.color = "#1B6B52";
     statusEl.style.fontWeight = "600";
     }
 
@@ -2335,15 +2594,6 @@ for (const origFile of files) {
 }
 
 return mediaKeys;
-}
-
-function fakeLogout() {
-currentUserId = null;
-localStorage.removeItem(LS_KEY);
-document.getElementById("user-id-input").value = "";
-document.getElementById("user-info").innerText =
-    "Не авторизованы";
-refresh();
 }
 
 function onLayerChange() {
@@ -2525,18 +2775,16 @@ layersFloatingControl = new LayersFloatingControl();
 map.addControl(layersFloatingControl, "bottom-right");
 
 map.on("contextmenu", (e) => {
+  // W2: запрет до входа — не подавлять стандартное меню для гостя
+  if (!currentUser) return;
+
   if (e.originalEvent && e.originalEvent.preventDefault) {
     e.originalEvent.preventDefault();
   }
 
-  // запрет до входа
-  if (!currentUser) {
-    const statusEl = document.getElementById("web-add-status");
-    if (statusEl) statusEl.innerText = "Сначала войдите, чтобы добавлять точки.";
-    return;
-  }
-
   setTempMarker(e.lngLat);
+  // Автопереключение на таб «Место»
+  switchTab("place");
 });
 
 function clearMarkers() {
@@ -2651,11 +2899,13 @@ function createClusterMarker(count) {
 }
 
 function updateCounter(n) {
-document.getElementById("points-counter").innerText = "Точек: " + n;
+const el = document.getElementById("points-counter");
+if (el) el.innerText = "Точек: " + n;
 }
 
 function setStatus(text, isError) {
 const el = document.getElementById("status-text");
+if (!el) return;
 el.innerText = text;
 el.style.color = isError ? "#dc2626" : "#16a34a";
 }
@@ -2791,7 +3041,7 @@ async function refresh() {
       // серый пин для точек на модерации/отклонённых, зелёный для своих, синий для чужих
       const isPending = p.moderation_status === "pending";
       const isRejected = p.moderation_status === "rejected";
-      const pinColor = (isPending || isRejected) ? "#9ca3af" : undefined;
+      const pinColor = (isPending || isRejected) ? "#A0A0A0" : undefined;
       const el = createPin(p.isMine, pinColor);
 
       const who = p.isMine
@@ -2827,14 +3077,14 @@ async function refresh() {
       // кнопки модерации в попапе (только для pending-точек, видны admin/moderator)
       const moderationBtns = isPending && currentUser && (currentUser.role === "admin" || currentUser.role === "moderator")
         ? `<div style="margin-top:6px;display:flex;gap:6px;">
-            <button onclick="moderatePlace(${p.id},'approved')" style="font-size:12px;padding:4px 10px;border-radius:9999px;border:1px solid #16a34a;background:#dcfce7;color:#15803d;cursor:pointer;">Одобрить</button>
-            <button onclick="moderatePlace(${p.id},'rejected')" style="font-size:12px;padding:4px 10px;border-radius:9999px;border:1px solid #dc2626;background:#fee2e2;color:#b91c1c;cursor:pointer;">Отклонить</button>
+            <button onclick="moderatePlace(${p.id},'approved')" style="font-size:12px;padding:4px 10px;border-radius:9999px;border:1px solid #1B6B52;background:#E0F0E8;color:#145A44;cursor:pointer;">Одобрить</button>
+            <button onclick="moderatePlace(${p.id},'rejected')" style="font-size:12px;padding:4px 10px;border-radius:9999px;border:1px solid #C44B3F;background:#FDF0EE;color:#A33D33;cursor:pointer;">Отклонить</button>
           </div>`
         : "";
 
       let deleteButtonHtml = "";
       if (p.isMine) {
-      deleteButtonHtml = `<br><button class="mm-delete-btn" data-id="${p.id}" style="margin-top:4px;font-size:12px;padding:4px 8px;border-radius:9999px;border:1px solid #dc2626;background:#fee2e2;color:#b91c1c;cursor:pointer;">
+      deleteButtonHtml = `<br><button class="mm-delete-btn" data-id="${p.id}" style="margin-top:4px;font-size:12px;padding:4px 8px;border-radius:9999px;border:1px solid #C44B3F;background:#FDF0EE;color:#A33D33;cursor:pointer;">
           Удалить точку
       </button>`;
       }
@@ -2910,7 +3160,7 @@ async function refresh() {
             ${reportMenuHtml}
           </div>
           ${noteBlock}
-          <div style="margin-top:6px;font-size:11px;color:#6b7280;overflow-wrap:break-word;">${esc(who)}</div>
+          <div style="margin-top:6px;font-size:11px;color:#6B8F7F;overflow-wrap:break-word;">${esc(who)}</div>
           ${pendingBadge}
           ${moderationBtns}
           ${addBtnHtml}
@@ -3493,8 +3743,8 @@ async function loadModerationQueue() {
 
       // Метка: новая точка или жалобы на approved-точку
       const label = p.moderation_status === "approved"
-        ? '<span style="color:#dc2626;font-weight:500;">\u26A0 Жалобы</span>'
-        : '<span style="color:#6b7280;">Новая точка</span>';
+        ? '<span style="color:#C44B3F;font-weight:500;">\u26A0 Жалобы</span>'
+        : '<span style="color:#6B8F7F;">Новая точка</span>';
 
       // Обрезаем описание до 100 символов для превью
       const notePreview = p.note && p.note.length > 100
@@ -3513,26 +3763,33 @@ async function loadModerationQueue() {
 
       // Жалобы на эту точку
       const reports = Array.isArray(p.reports) ? p.reports : [];
-      const reportsHtml = reports.map(r => {
+      const reportsHtml = reports.map((r, i) => {
         const who = r.user_login || r.username || `user#${r.user_id}`;
         const cat = escapeHtml(r.category_label || r.category);
         const comm = r.comment ? ": " + escapeHtml(r.comment) : "";
-        return `<div class="mm-report-line">Жалоба от @${escapeHtml(who)}: ${cat}${comm}</div>`;
+        const text = `Жалоба от @${escapeHtml(who)}: ${cat}${comm}`;
+        // сворачиваем если текст длинный (>80 символов)
+        const isLong = text.length > 80;
+        const rid = `report-${p.id}-${i}`;
+        return isLong
+          ? `<div class="mm-report-line collapsed" id="${rid}">${text}</div>` +
+            `<button class="mm-report-toggle" onclick="var el=document.getElementById('${rid}');if(el.classList.contains('collapsed')){el.classList.remove('collapsed');this.textContent='свернуть'}else{el.classList.add('collapsed');this.textContent='развернуть'}">развернуть</button>`
+          : `<div class="mm-report-line">${text}</div>`;
       }).join("");
 
       return `
-        <div style="padding:8px 0;border-bottom:1px solid #e5e7eb;">
-          <div style="font-weight:500;overflow-wrap:break-word;">${escapeHtml(title)} <span style="font-size:12px;font-weight:400;margin-left:6px;">${label}</span></div>
-          <div style="font-size:12px;color:#6b7280;overflow-wrap:break-word;">${escapeHtml(author)} \u00B7 ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
-          ${notePreview ? `<div style="font-size:12px;margin-top:2px;overflow-wrap:break-word;">${escapeHtml(notePreview)}</div>` : ""}
+        <div style="padding:8px 0;border-bottom:1px solid #D6CFC5;overflow:hidden;">
+          <div style="font-weight:500;overflow-wrap:break-word;word-break:break-word;">${escapeHtml(title)} <span style="font-size:12px;font-weight:400;margin-left:6px;">${label}</span></div>
+          <div style="font-size:12px;color:#6B8F7F;overflow-wrap:break-word;word-break:break-word;">${escapeHtml(author)} \u00B7 ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}</div>
+          ${notePreview ? `<div style="font-size:12px;margin-top:2px;overflow-wrap:break-word;word-break:break-word;">${escapeHtml(notePreview)}</div>` : ""}
           ${reportsHtml}
           ${photosHtml}
-          <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
+          <div style="margin-top:6px;display:flex;gap:6px;">
             <button class="btn" style="font-size:12px;padding:2px 10px;"
-              onclick="showPlaceOnMap(${p.id},${p.lon},${p.lat},${p.group_id})">Показать на карте</button>
+              onclick="showPlaceOnMap(${p.id},${p.lon},${p.lat},${p.group_id})">На карте</button>
             <button class="btn btn-primary" style="font-size:12px;padding:2px 10px;"
               onclick="moderatePlace(${p.id},'approved')">Одобрить</button>
-            <button class="btn" style="font-size:12px;padding:2px 10px;border-color:#dc2626;color:#b91c1c;"
+            <button class="btn" style="font-size:12px;padding:2px 10px;border-color:#C44B3F;color:#A33D33;"
               onclick="moderatePlace(${p.id},'rejected')">Отклонить</button>
           </div>
         </div>
@@ -4089,7 +4346,7 @@ async function submitComment() {
   const text = (input?.value || "").trim();
 
   if (!text) {
-    if (statusEl) { statusEl.innerText = "Введите текст комментария."; statusEl.style.color = "#b91c1c"; }
+    if (statusEl) { statusEl.innerText = "Введите текст комментария."; statusEl.style.color = "#A33D33"; }
     return;
   }
 
@@ -4110,7 +4367,7 @@ async function submitComment() {
       const data = await resp.json().catch(() => ({}));
       // Pydantic 422 возвращает detail как массив — обрабатываем отдельно
       if (resp.status === 422) {
-        if (statusEl) { statusEl.innerText = "Текст слишком длинный (макс. 1000 символов)."; statusEl.style.color = "#b91c1c"; }
+        if (statusEl) { statusEl.innerText = "Текст слишком длинный (макс. 1000 символов)."; statusEl.style.color = "#A33D33"; }
         return;
       }
       const msg = data.detail || "Ошибка";
@@ -4125,7 +4382,7 @@ async function submitComment() {
         "parent_wrong_place": "Родительский комментарий от другой точки.",
         "user_blocked": "Комментирование недоступно.",
       };
-      if (statusEl) { statusEl.innerText = messages[msg] || `Ошибка: ${msg}`; statusEl.style.color = "#b91c1c"; }
+      if (statusEl) { statusEl.innerText = messages[msg] || `Ошибка: ${msg}`; statusEl.style.color = "#A33D33"; }
       return;
     }
 
@@ -4145,7 +4402,7 @@ async function submitComment() {
     }
   } catch (e) {
     console.error(e);
-    if (statusEl) { statusEl.innerText = "Ошибка сети."; statusEl.style.color = "#b91c1c"; }
+    if (statusEl) { statusEl.innerText = "Ошибка сети."; statusEl.style.color = "#A33D33"; }
   } finally {
     _commentSubmitting = false;
   }
@@ -4390,7 +4647,7 @@ async function submitReport() {
 
   // Для категории «Другое» комментарий обязателен
   if (category === "other" && !comment) {
-    if (statusEl) { statusEl.innerText = "Для категории «Другое» укажите комментарий."; statusEl.style.color = "#b91c1c"; }
+    if (statusEl) { statusEl.innerText = "Для категории «Другое» укажите комментарий."; statusEl.style.color = "#A33D33"; }
     return;
   }
 
@@ -4418,7 +4675,7 @@ async function submitReport() {
         "comment_too_long": "Комментарий слишком длинный (макс. 1000 символов).",
         "invalid_category": "Некорректная категория.",
       };
-      if (statusEl) { statusEl.innerText = messages[msg] || `Ошибка: ${msg}`; statusEl.style.color = "#b91c1c"; }
+      if (statusEl) { statusEl.innerText = messages[msg] || `Ошибка: ${msg}`; statusEl.style.color = "#A33D33"; }
       return;
     }
 
@@ -4426,7 +4683,7 @@ async function submitReport() {
     refresh();
   } catch (e) {
     console.error(e);
-    if (statusEl) { statusEl.innerText = "Ошибка сети."; statusEl.style.color = "#b91c1c"; }
+    if (statusEl) { statusEl.innerText = "Ошибка сети."; statusEl.style.color = "#A33D33"; }
   } finally {
     _submittingReport = false;
   }
@@ -4497,12 +4754,13 @@ async function loadAdminUsers() {
 
 /** Фильтр списка пользователей по поисковой строке */
 function filterAdminUsers() {
+  const list = _adminUsersList || [];
   const q = (document.getElementById("admin-search")?.value || "").trim().toLowerCase();
   if (!q) {
-    renderAdminUsers(_adminUsersList);
+    renderAdminUsers(list);
     return;
   }
-  const filtered = _adminUsersList.filter(u =>
+  const filtered = list.filter(u =>
     (u.login || "").toLowerCase().includes(q) ||
     (u.email || "").toLowerCase().includes(q)
   );
@@ -4535,14 +4793,14 @@ function renderAdminUsers(users) {
 
     // для админа — текстовая метка, для остальных — select
     const roleHtml = isAdmin
-      ? `<span style="font-size:12px;color:#4f46e5;font-weight:500;">Админ</span>`
-      : `<select ${disabled} style="font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid #d1d5db;width:100%;"
+      ? `<span style="font-size:12px;color:#1B6B52;font-weight:500;">Админ</span>`
+      : `<select ${disabled} style="font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid #C5B9A8;width:100%;"
           onchange="changeUserRole(${u.id}, this.value)">${options}</select>`;
 
     return `
-      <div style="padding:6px 0;border-bottom:1px solid #e5e7eb;">
+      <div style="padding:6px 0;border-bottom:1px solid #D6CFC5;">
         <div style="font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.login || "—")}</div>
-        <div style="font-size:11px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.email || "нет email")}</div>
+        <div style="font-size:11px;color:#6B8F7F;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.email || "нет email")}</div>
         <div style="margin-top:3px;">${roleHtml}</div>
       </div>
     `;
@@ -4579,6 +4837,24 @@ setInterval(async () => {
   try {
     await refreshUserSnapshot();
     updateNotifBadge();
+    updateModerationBadge();
+
+    // C13: проверить роль, скрыть/показать таб модерации
+    const isMod = currentUser && (currentUser.role === "admin" || currentUser.role === "moderator");
+    const tabBtnMod = document.getElementById("tab-btn-moderation");
+    if (tabBtnMod) tabBtnMod.style.display = isMod ? "" : "none";
+    // Если текущий таб = moderation и роль user → переключиться на layers
+    if (!isMod && _currentTab === "moderation") {
+      _currentTab = "layers";
+      switchTab("layers");
+    }
+
+    // Панель администратора
+    const adminPanel = document.getElementById("admin-panel");
+    if (adminPanel) {
+      adminPanel.style.display = (currentUser && currentUser.role === "admin") ? "" : "none";
+    }
+
     refreshFriendsUI();
     renderGroupLayersUI();
     populateAddGroupSelect();

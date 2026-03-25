@@ -19,6 +19,7 @@ from app.api import (
 from app.api import bot as bot_api
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 
 app = FastAPI(title="MemoryMap API")
 app.include_router(auth.router, prefix="/v1")
@@ -43,6 +44,11 @@ app.include_router(moderation.router, prefix="/v1")
 app.include_router(users.router, prefix="/v1")
 app.include_router(friends.router, prefix="/v1")
 app.include_router(blocks.router, prefix="/v1")
+
+# SPA fallback — прямой переход на /settings (закладка, F5) отдаёт index.html
+@app.get("/settings")
+async def spa_settings():
+    return FileResponse("frontend/index.html")
 
 # static frontend
 app.mount("/", StaticFiles(directory="frontend", html=True), name="static")

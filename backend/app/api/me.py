@@ -65,6 +65,13 @@ def me(
     blocked_users = BlockService.list_blocked(db, current_user)
     notifications_count = NotificationService.count_unread(db, current_user.id)
 
+    # Количество точек на модерации (только для admin/moderator)
+    moderation_pending_count = 0
+    if current_user.role in ("admin", "moderator"):
+        moderation_pending_count = db.query(Place).filter(
+            Place.moderation_status == "pending"
+        ).count()
+
     return {
         "id": current_user.id,
         "tg_id": current_user.tg_id,
@@ -79,6 +86,7 @@ def me(
         "group_invites_inbox_count": group_invites_count,
         "blocked_users": blocked_users,
         "notifications_count": notifications_count,
+        "moderation_pending_count": moderation_pending_count,
     }
 
 # Legacy endpoint: keep path for compatibility, but now it creates a friend REQUEST by tg_id.
