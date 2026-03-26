@@ -3,7 +3,8 @@ from typing import List, Optional
 from app.core.auth import get_current_user
 from app.core.config import BOT_API_SECRET, MEDIA_LIMIT_PER_PLACE
 from app.core.deps import get_db
-from app.models.models import Media, Place, User
+from app.models.models import Group, Media, Place, User
+from app.services.groups import GroupService
 from app.services.places import PlaceService
 from app.storage import detect_mime, move_to_place_folder, validate_temp_key
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
@@ -209,6 +210,28 @@ def update_place(
         if len(raw) > 5000:
             raise HTTPException(status_code=400, detail="note_too_long")
         place.note = raw
+
+    if "group_id" in payload:
+        new_gid = payload["group_id"]
+        if not isinstance(new_gid, int):
+            raise HTTPException(400, "invalid_group_id")
+        # Если слой не изменился — пропускаем (не трогаем модерацию)
+        if new_gid != place.group_id:
+            new_group = db.query(Group).filter(Group.id == new_gid).one_or_none()
+            if not new_group:
+                raise HTTPException(404, "group_not_found")
+            # Проверить доступ: владелец или editor целевой группы
+            try:
+                GroupService.require_can_add_place(db, current_user, new_group)
+            except PermissionError:
+                raise HTTPException(403, "no_write_access")
+            # Модерация: перенос в public-группу → pending (если юзер не admin/moderator)
+            if new_group.visibility == "public" and current_user.role not in ("admin", "moderator"):
+                place.moderation_status = "pending"
+            # Перенос в private-группу → auto-approve (модерация не нужна)
+            elif new_group.visibility != "public" and place.moderation_status in ("pending", "rejected"):
+                place.moderation_status = "approved"
+            place.group_id = new_gid
 
     db.commit()
     return {"status": "ok"}

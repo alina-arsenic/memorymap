@@ -8,6 +8,11 @@ let markersByPlaceId = {}; // {place_id: Marker} — для открытия п�
 let pendingPopupPlaceId = null; // placeId для открытия попапа после refresh
 let pendingPopupGroupId = null; // groupId для включения в feed-запрос
 let pendingCommentId = null; // commentId для автооткрытия комментариев из уведомления
+let _currentPlaces = []; // текущие отфильтрованные точки (обновляется в refresh())
+let _editingPlaceId = null; // id точки, редактируемой в sidebar
+let _savingEdit = false; // защита от двойного клика «Сохранить»
+let _popupNeedsPersistence = false; // попап не влез на экран — сохранять при перемещении карты
+let _pendingPopupFromPersistence = false; // pendingPopupPlaceId установлен из persistence (не из flyTo)
 
 let tempMarker = null; // временный желтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
@@ -180,6 +185,8 @@ function switchTab(tabName) {
   _currentTab = tabName;
   // Закрыть панель карточек слоя при уходе с таба «Слои»
   if (tabName !== "layers") closeLayerCardsPanel();
+  // Закрыть edit place при уходе с таба «Место»
+  if (_editingPlaceId && tabName !== "place") closeEditPlace();
 
   // Обновить кнопки табов
   const tabs = document.querySelectorAll(".sidebar-tab");
@@ -948,10 +955,15 @@ function uiLogout() {
   personalGroupId = null;
   layersFloatingControl?.hide();
 
+  // Закрыть edit place если открыт
+  closeEditPlace();
+
   // C18: сброс pending-переменных
   pendingPopupPlaceId = null;
   pendingPopupGroupId = null;
   pendingCommentId = null;
+  _popupNeedsPersistence = false;
+  _pendingPopupFromPersistence = false;
   outgoingPendingIds = new Set();
   _adminUsersList = null;
 
@@ -1840,6 +1852,8 @@ document.addEventListener("keydown", (e) => {
       });
       return;
     }
+    // Приоритет 4.5: sidebar edit (после dropdown, чтобы Escape сначала закрыл dropdown)
+    if (_editingPlaceId) { closeEditPlace(); return; }
     // Приоритет 5: модалка удаления аккаунта (вложена в settings)
     const delOverlay = document.getElementById("delete-account-overlay");
     if (delOverlay && delOverlay.style.display !== "none") {
@@ -1903,7 +1917,7 @@ document.addEventListener("click", (e) => {
   if (layersFloatingControl?.isOpen() && !e.target.closest(".mm-layers-float")) {
     layersFloatingControl.close();
   }
-  if (e.target.closest(".mm-popup-dropdown")) return;
+  if (e.target.closest(".mm-popup-dropdown") || e.target.closest(".mm-popup-menu-btn")) return;
   document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
 
   // Делегированный обработчик «Ответить» (data-атрибуты вместо inline onclick — защита от XSS)
@@ -2832,6 +2846,8 @@ map.on("contextmenu", (e) => {
     e.originalEvent.preventDefault();
   }
 
+  // Закрыть edit place если открыт — ПКМ = добавление новой точки
+  if (_editingPlaceId) closeEditPlace();
   setTempMarker(e.lngLat);
   // Автопереключение на таб «Место»
   switchTab("place");
@@ -3067,6 +3083,19 @@ async function refresh() {
       }
   }
 
+  _currentPlaces = filtered;
+
+  // Сохранить открытый попап для переоткрытия после refresh (только если не влез на экран)
+  if (pendingPopupPlaceId === null && _popupNeedsPersistence) {
+    for (const [pid, m] of Object.entries(markersByPlaceId)) {
+      if (m.getPopup && m.getPopup()?.isOpen()) {
+        pendingPopupPlaceId = Number(pid);
+        _pendingPopupFromPersistence = true;
+        break;
+      }
+    }
+  }
+
   clearMarkers();
 
   // Кластеризация: при зуме < 15 группируем близкие точки
@@ -3098,11 +3127,6 @@ async function refresh() {
           ? "Моя точка"
           : (p.user_login ? p.user_login : (p.username ? ("@" + p.username) : "Аноним"));
 
-      const displayTitle =
-      p.title && p.title.trim()
-          ? p.title
-          : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
-
       // плашка «На модерации» (новая точка) / «Поступила жалоба» (approved с жалобой)
       let pendingBadge = "";
       if (isPending) {
@@ -3113,14 +3137,23 @@ async function refresh() {
         pendingBadge = `<div class="mm-report-badge mm-report-badge--reported">Поступила жалоба</div>`;
       }
 
-      // Кнопка «⋯» → «Пожаловаться» на чужих approved-точках
+      // экранируем кавычки
+      const esc = (s) => String(s).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+      // Единый ⋯ меню: пункты зависят от роли
+      const menuItems = [];
+      if (p.isMine) {
+        menuItems.push(`<button class="mm-popup-dropdown-item mm-popup-dropdown-item--default" onclick="openEditPlace(${p.id})">Редактировать</button>`);
+        menuItems.push(`<button class="mm-popup-dropdown-item mm-popup-dropdown-item--danger" onclick="confirmDeletePlace(${p.id})">Удалить</button>`);
+      }
       const canReport = !p.isMine && !isPending && currentUser;
-      const reportMenuHtml = canReport
+      if (canReport) {
+        menuItems.push(`<button class="mm-popup-dropdown-item mm-popup-dropdown-item--danger" onclick="openReportModal(${p.id})">Пожаловаться</button>`);
+      }
+      const menuHtml = menuItems.length > 0
         ? `<div class="mm-popup-menu">
             <button class="mm-popup-menu-btn" onclick="this.nextElementSibling.classList.toggle('open');event.stopPropagation();" title="Действия">⋯</button>
-            <div class="mm-popup-dropdown">
-              <button class="mm-popup-dropdown-item" onclick="openReportModal(${p.id})">Пожаловаться</button>
-            </div>
+            <div class="mm-popup-dropdown">${menuItems.join("")}</div>
           </div>`
         : "";
 
@@ -3132,69 +3165,48 @@ async function refresh() {
           </div>`
         : "";
 
-      let deleteButtonHtml = "";
-      if (p.isMine) {
-      deleteButtonHtml = `<br><button class="mm-delete-btn" data-id="${p.id}" style="margin-top:4px;font-size:12px;padding:4px 8px;border-radius:9999px;border:1px solid #C44B3F;background:#FDF0EE;color:#A33D33;cursor:pointer;">
-          Удалить точку
-      </button>`;
-      }
-
+      // Фото: все в сетке со скроллом
       let photosHtml = "";
       if (p.media && p.media.length) {
-      const thumbs = p.media.slice(0, 12).map(m => {
-        const safeUrl = m.url;
-        const del = p.isMine
-          ? `<button class="mm-del-media-btn" data-media-id="${m.id}" title="Удалить"
-              style="position:absolute;top:2px;right:2px;border:none;background:rgba(0,0,0,0.55);color:#fff;border-radius:9999px;width:18px;height:18px;cursor:pointer;">
-              ×
-            </button>`
+        const maxVisible = 3;
+        const visible = p.media.slice(0, maxVisible);
+        const hiddenCount = p.media.length - maxVisible;
+        const thumbs = visible.map(m =>
+          `<img src="${m.url}" data-full="${m.url}" class="mm-photo-thumb" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" />`
+        ).join("");
+        const moreBtn = hiddenCount > 0
+          ? `<div class="mm-photo-more" onclick="openGalleryForPlace(${p.id},${maxVisible});event.stopPropagation();">+${hiddenCount}</div>`
           : "";
-
-        return `
-          <div style="position:relative;width:60px;height:60px;">
-            <img src="${safeUrl}" data-full="${safeUrl}" class="mm-photo-thumb"
-                style="width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;" />
-            ${del}
-          </div>
-        `;
-      }).join("");
-
-      photosHtml = `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${thumbs}</div>`;
+        photosHtml = `<div class="mm-popup-photos" data-place-id="${p.id}">${thumbs}${moreBtn}</div>`;
       }
 
-      const initialTitle = (p.title || "").trim()
-        ? p.title
-        : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
+      const displayTitle =
+        p.title && p.title.trim()
+          ? p.title
+          : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`;
 
-      const initialNote = p.note || "";
+      const titleHtml = `<div class="mm-popup-title">${esc(displayTitle)}</div>`;
 
-      // экранируем кавычки
-      const esc = (s) => String(s).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-
-      const titleBlock = p.isMine
-        ? `<div class="mm-edit-row">
-            <div class="mm-popup-title">${esc(initialTitle)}</div>
-            <button class="mm-edit-btn" data-id="${p.id}" data-field="title" data-initial="${esc(initialTitle)}" title="Редактировать">✎</button>
-          </div>`
-        : `<div class="mm-popup-title">${esc(initialTitle)}</div>`;
-
-      const noteBlock = p.isMine
-        ? `<div class="mm-edit-row">
-            <div class="mm-popup-note">${esc(initialNote)}</div>
-            <button class="mm-edit-btn" data-id="${p.id}" data-field="note" data-initial="${esc(initialNote)}" title="Редактировать">✎</button>
-          </div>`
-        : `<div class="mm-popup-note">${esc(initialNote)}</div>`;
-
-      const limit = 12;
-      const have = (p.media || []).length;
-      const canAdd = p.isMine && have < limit;
-      const addBtnHtml = canAdd
-        ? `<div style="margin-top:6px;">
-            <button class="btn mm-add-photo-btn" data-id="${p.id}" data-have="${have}">
-              Добавить фото
-            </button>
-          </div>`
+      // Бейдж слоя (не для личной группы)
+      const layerBadgeHtml = (!p.group_is_personal && p.group_name)
+        ? `<span class="mm-layer-badge">${esc(p.group_name)}</span>`
         : "";
+
+      // Описание: collapse >3 строк, «Развернуть» inline после текста
+      const noteText = p.note || "";
+      const needsCollapse = noteText.length > 150 || noteText.split("\n").length > 3;
+      let noteHtml = "";
+      if (noteText) {
+        if (needsCollapse) {
+          // Обрезаем до 3 строк / 150 символов
+          let truncLines = noteText.split("\n").slice(0, 3).join("\n");
+          if (truncLines.length > 150) truncLines = truncLines.substring(0, 150);
+          truncLines = truncLines.trimEnd();
+          noteHtml = `<div class="mm-popup-note" data-place-id="${p.id}"><span class="mm-popup-note-text">${esc(truncLines)}… </span><span class="mm-popup-expand" onclick="expandPopupNote(${p.id});event.stopPropagation();">Развернуть</span></div>`;
+        } else {
+          noteHtml = `<div class="mm-popup-note">${esc(noteText)}</div>`;
+        }
+      }
 
       // Кнопка «Комментарии (N)» — для не-личных точек
       const commentsCount = p.comments_count || 0;
@@ -3203,33 +3215,44 @@ async function refresh() {
         ? `<button class="mm-comments-btn" onclick="openCommentsModal(${p.id}, ${p.user_id || 'null'})">${pluralRu(commentsCount, "Комментарий", "Комментария", "Комментариев")} (${commentsCount})</button>`
         : "";
 
-      const popupHtml = `
-        <div class="mm-popup">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;">
-            <div style="flex:1;min-width:0;">${titleBlock}</div>
-            ${reportMenuHtml}
-          </div>
-          ${noteBlock}
-          <div style="margin-top:6px;font-size:11px;color:#6B8F7F;overflow-wrap:break-word;">${esc(who)}</div>
-          ${pendingBadge}
-          ${moderationBtns}
-          ${addBtnHtml}
-          ${photosHtml}
-          ${commentsBtnHtml}
-          ${deleteButtonHtml}
-        </div>
-      `;
+      const popupHtml = `<div class="mm-popup">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;">
+<div style="flex:1;min-width:0;">${titleHtml}</div>
+${menuHtml}
+</div>
+<div class="mm-popup-meta">${esc(who)} ${layerBadgeHtml}</div>
+${noteHtml}
+${pendingBadge}
+${moderationBtns}
+${photosHtml}
+${commentsBtnHtml}
+</div>`;
+
+      const popup = new maplibregl.Popup({ closeButton: false }).setHTML(popupHtml);
+      // Проверяем, влез ли попап на экран — если нет, сохраняем при перемещении карты
+      popup.on('open', () => {
+        requestAnimationFrame(() => {
+          const popupEl = popup.getElement();
+          if (popupEl) {
+            const r = popupEl.getBoundingClientRect();
+            _popupNeedsPersistence = !(
+              r.top >= 0 && r.left >= 0 &&
+              r.bottom <= window.innerHeight && r.right <= window.innerWidth
+            );
+          }
+        });
+      });
 
       const marker = new maplibregl.Marker({ element: el, anchor: "bottom" })
       .setLngLat([p.lon, p.lat])
-      .setPopup(new maplibregl.Popup().setHTML(popupHtml))
+      .setPopup(popup)
       .addTo(map);
 
       currentMarkers.push(marker);
       markersByPlaceId[p.id] = marker;
   });
 
-  // Открываем попап, если был запрос через "Показать на карте"
+  // Открываем попап, если был запрос через "Показать на карте" или persistence
   // Только когда карта остановилась — иначе следующий refresh уничтожит попап
   if (pendingPopupPlaceId !== null && !map.isMoving()) {
     const marker = markersByPlaceId[pendingPopupPlaceId];
@@ -3250,103 +3273,211 @@ async function refresh() {
       }
       pendingPopupPlaceId = null;
       pendingPopupGroupId = null;
+      _pendingPopupFromPersistence = false;
+    } else if (_pendingPopupFromPersistence) {
+      // Точка вышла за bbox — прекращаем попытки persistence
+      pendingPopupPlaceId = null;
+      _pendingPopupFromPersistence = false;
+      _popupNeedsPersistence = false;
     }
-    // Маркер не найден или карта ещё летит — следующий refresh попробует снова
   }
 
   updateCounter(filtered.length);
   setStatus("Подключено к API", false);
 }
 
-document.addEventListener("click", async (e) => {
-  const btn = e.target;
-  if (!btn.classList.contains("mm-delete-btn")) return;
-
-  e.preventDefault();
-  e.stopPropagation();
-
-  const id = btn.getAttribute("data-id");
-  if (!id) return;
-
-  // подтверждение
-  const confirmDelete = confirm("Удалить эту точку?");
-  if (!confirmDelete) return;
-
-  if (!accessToken) {
-      alert("Нужно авторизоваться, чтобы удалять точки.");
-      return;
+/** Развернуть/свернуть описание в попапе */
+function expandPopupNote(placeId) {
+  var p = _currentPlaces.find(function(x) { return x.id === placeId; });
+  if (!p || !p.note) return;
+  var noteDiv = document.querySelector('.mm-popup-note[data-place-id="' + placeId + '"]');
+  if (!noteDiv) return;
+  var textSpan = noteDiv.querySelector(".mm-popup-note-text");
+  var expandBtn = noteDiv.querySelector(".mm-popup-expand");
+  if (!textSpan || !expandBtn) return;
+  var isExpanded = noteDiv.classList.toggle("mm-popup-note--expanded");
+  if (isExpanded) {
+    textSpan.textContent = p.note + " ";
+    expandBtn.textContent = "Свернуть";
+  } else {
+    var lines = p.note.split("\n").slice(0, 3).join("\n");
+    if (lines.length > 150) lines = lines.substring(0, 150);
+    textSpan.textContent = lines.trimEnd() + "… ";
+    expandBtn.textContent = "Развернуть";
   }
+}
 
-  btn.disabled = true;
-  const originalText = btn.textContent;
-  btn.textContent = "Удаление...";
-
-  try {
-      const resp = await apiFetch(`/v1/places/${id}`, { method: "DELETE" });
-
-      if (!resp.ok) {
-      console.error("Delete failed", resp.status);
-      alert("Не удалось удалить точку (код " + resp.status + ").");
-      btn.disabled = false;
-      btn.textContent = originalText;
-      return;
-      }
-
-      // обновляем карту
-      refresh();
-      refreshLayerCardsPanel();
-  } catch (err) {
-      console.error(err);
-      alert("Ошибка соединения при удалении точки.");
-      btn.disabled = false;
-      btn.textContent = originalText;
-  }
-});
-
-document.addEventListener("click", async (e) => {
-  const btn = e.target;
-  if (!btn.classList || !btn.classList.contains("mm-edit-btn")) return;
-
-  e.preventDefault();
-  e.stopPropagation();
-
-  const id = btn.getAttribute("data-id");
-  const field = btn.getAttribute("data-field");
-  const initial = btn.getAttribute("data-initial") || "";
-  if (!id || !field) return;
-
-  if (!accessToken) { alert("Нужно войти."); return; }
-
-  const next = await mmOpenModal({
-    title: field === "title" ? "Редактировать название" : "Редактировать заметку",
-    mode: field,
-    initial,
-  });
-
-  if (next === null) return;
-
-  const payload = {};
-  payload[field] = next;
-
-  const resp = await apiFetch(`/v1/places/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!resp.ok) {
-    const errData = await resp.json().catch(() => ({}));
-    const detail = errData.detail || "";
-    let msg = "Не удалось сохранить (код " + resp.status + ")";
-    if (detail === "title_too_long") msg = "Название слишком длинное (максимум 200 символов)";
-    else if (detail === "note_too_long") msg = "Заметка слишком длинная (максимум 5000 символов)";
-    alert(msg);
-    return;
-  }
-
+/** Удалить точку через ⋯ меню */
+async function confirmDeletePlace(placeId) {
+  // Закрываем dropdown
+  document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+  if (!confirm("Удалить эту точку?")) return;
+  if (!accessToken) { alert("Нужно авторизоваться."); return; }
+  const resp = await apiFetch(`/v1/places/${placeId}`, { method: "DELETE" });
+  if (!resp.ok) { alert("Ошибка удаления (код " + resp.status + ")"); return; }
   refresh();
   refreshLayerCardsPanel();
-});
+}
+
+/** Открыть галерею со всеми фото точки */
+function openGalleryForPlace(placeId, startIndex) {
+  const p = _currentPlaces.find(x => x.id === placeId);
+  if (!p || !p.media || !p.media.length) return;
+  const urls = p.media.map(m => m.url);
+  openGallery(urls, startIndex || 0);
+}
+
+// ========= Sidebar: редактирование точки =========
+
+/** Открыть форму редактирования точки в sidebar */
+function openEditPlace(placeId) {
+  // Закрываем dropdown
+  document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+
+  const place = _currentPlaces.find(p => p.id === placeId);
+  if (!place) { alert("Точка не найдена."); return; }
+
+  _editingPlaceId = placeId;
+  _popupNeedsPersistence = false; // сбрасываем persistence при переходе к edit
+
+  // Title, Note
+  const editTitleEl = document.getElementById("edit-title");
+  editTitleEl.value = place.title || "";
+  document.getElementById("edit-note").value = place.note || "";
+
+  // Слой — select из доступных групп (owner/editor)
+  renderEditGroupSelect(place);
+
+  // Фото
+  renderEditPhotos(place);
+
+  // Переключиться на таб «Место» и показать секцию редактирования
+  switchTab("place");
+  document.getElementById("place-add-section").style.display = "none";
+  document.getElementById("place-edit-section").style.display = "";
+
+  // Подстроить высоту textarea названия (после показа секции, иначе scrollHeight = 0)
+  editTitleEl.style.height = "auto";
+  editTitleEl.style.height = editTitleEl.scrollHeight + "px";
+
+  // Закрыть попап
+  currentMarkers.forEach(m => {
+    const popup = m.getPopup();
+    if (popup && popup.isOpen()) popup.remove();
+  });
+
+  // Очистить статус
+  const statusEl = document.getElementById("edit-status");
+  if (statusEl) { statusEl.innerText = ""; statusEl.style.color = ""; }
+}
+
+/** Заполнить select слоя для edit */
+function renderEditGroupSelect(place) {
+  const sel = document.getElementById("edit-group");
+  if (!currentUser || !currentUser.groups) { sel.innerHTML = ""; return; }
+
+  // Доступные группы: Public map (id=1) + private где owner/editor (кроме чужих личных)
+  // Аналогично фильтру в форме создания точки (renderGroupSelect)
+  const available = [];
+  for (const g of currentUser.groups) {
+    if (!g || !g.id) continue;
+    if (g.id === 1) {
+      available.push(g);
+    } else if (g.visibility === "public") {
+      continue; // остальные публичные группы пропускаем
+    } else if ((g.my_role === "owner" || g.my_role === "editor") &&
+               (!g.is_personal || g.my_role === "owner")) {
+      available.push(g);
+    }
+  }
+
+  sel.innerHTML = available.map(g => {
+    const selected = g.id === place.group_id ? "selected" : "";
+    return `<option value="${g.id}" ${selected}>${escapeHtml(g.name)}</option>`;
+  }).join("");
+}
+
+/** Отрисовать фото в edit panel */
+function renderEditPhotos(place) {
+  const container = document.getElementById("edit-photos");
+  const media = place.media || [];
+
+  container.innerHTML = media.map(m => `
+    <div style="position:relative;width:60px;height:60px;">
+      <img src="${m.url}" class="mm-photo-thumb"
+        style="width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;"
+        data-full="${m.url}" />
+      <button class="mm-del-media-btn" data-media-id="${m.id}" title="Удалить"
+        style="position:absolute;top:2px;right:2px;border:none;background:rgba(0,0,0,0.55);
+        color:#fff;border-radius:9999px;width:18px;height:18px;cursor:pointer;">×</button>
+    </div>
+  `).join("");
+
+  const actionsEl = document.getElementById("edit-photo-actions");
+  const remaining = 12 - media.length;
+  actionsEl.innerHTML = remaining > 0
+    ? `<button class="btn mm-add-photo-btn" data-id="${place.id}" data-have="${media.length}">Добавить фото</button>`
+    : `<span class="hint">Лимит фото (12)</span>`;
+}
+
+/** Сохранить изменения точки */
+async function saveEditPlace() {
+  if (_savingEdit) return;
+  _savingEdit = true;
+
+  const statusEl = document.getElementById("edit-status");
+  statusEl.innerText = "Сохранение...";
+  statusEl.style.color = "";
+
+  try {
+    const payload = {
+      title: document.getElementById("edit-title").value,
+      note: document.getElementById("edit-note").value,
+      group_id: Number(document.getElementById("edit-group").value),
+    };
+
+    const resp = await apiFetch(`/v1/places/${_editingPlaceId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      let msg = err.detail || "Ошибка сохранения";
+      if (msg === "title_too_long") msg = "Название слишком длинное (макс. 200)";
+      if (msg === "note_too_long") msg = "Заметка слишком длинная (макс. 5000)";
+      if (msg === "group_not_found") msg = "Слой не найден";
+      if (msg === "no_write_access") msg = "Нет доступа к этому слою";
+      statusEl.innerText = msg;
+      statusEl.style.color = "#b91c1c";
+      return;
+    }
+
+    statusEl.innerText = "Сохранено.";
+    statusEl.style.color = "#1B6B52";
+
+    refresh();
+    refreshLayerCardsPanel();
+    setTimeout(() => closeEditPlace(), 600);
+  } catch (e) {
+    console.error(e);
+    statusEl.innerText = "Ошибка сети.";
+    statusEl.style.color = "#b91c1c";
+  } finally {
+    _savingEdit = false;
+  }
+}
+
+/** Закрыть форму редактирования */
+function closeEditPlace() {
+  _editingPlaceId = null;
+  document.getElementById("place-edit-section").style.display = "none";
+  document.getElementById("place-add-section").style.display = "";
+
+  const statusEl = document.getElementById("edit-status");
+  if (statusEl) { statusEl.innerText = ""; statusEl.style.color = ""; }
+}
 
 // ========= Фото-галерея (lightbox) =========
 let _galleryState = null; // null = закрыта, { urls: string[], index: number }
@@ -3491,8 +3622,20 @@ document.addEventListener("click", function(e) {
   e.preventDefault();
   e.stopPropagation();
 
-  // Собираем все фото из контейнера.
-  // В попапах img обёрнут в wrapper-div (60×60), в модерации — прямо в flex-div.
+  // В попапе показаны только 3 фото — используем _currentPlaces для полного списка
+  var popupContainer = img.closest(".mm-popup");
+  if (popupContainer) {
+    var photoDiv = img.closest("[data-place-id]");
+    if (photoDiv) {
+      var placeId = Number(photoDiv.getAttribute("data-place-id"));
+      var visibleThumbs = photoDiv.querySelectorAll(".mm-photo-thumb");
+      var clickedIndex = Array.from(visibleThumbs).indexOf(img);
+      openGalleryForPlace(placeId, clickedIndex >= 0 ? clickedIndex : 0);
+      return;
+    }
+  }
+
+  // Для остальных контейнеров (модерация, sidebar edit) — из DOM
   var container = img.parentElement;
   if (container.querySelectorAll(".mm-photo-thumb").length <= 1) {
     container = container.parentElement;
@@ -3577,43 +3720,26 @@ document.addEventListener("click", async (e) => {
 
     // Сохраняем ссылки на DOM ДО await (после удаления wrapper будет недоступен)
     var wrapper = delMediaBtn.closest("div[style*='position:relative']");
-    var popup = delMediaBtn.closest(".mm-popup");
 
     var resp = await apiFetch("/v1/media/" + mediaId, { method: "DELETE" });
     if (!resp.ok) { alert("Не удалось удалить фото (код " + resp.status + ")"); return; }
 
-    // Точечное обновление DOM попапа вместо refresh()
+    // Sidebar edit path: обновляем _currentPlaces + перерисовываем edit panel
+    if (_editingPlaceId) {
+      var p = _currentPlaces.find(x => x.id === _editingPlaceId);
+      if (p) {
+        p.media = (p.media || []).filter(m => m.id !== Number(mediaId));
+        renderEditPhotos(p);
+      }
+      return;
+    }
+
+    // Попап path: точечное обновление DOM попапа
     if (wrapper) {
       var photosContainer = wrapper.parentElement;
       wrapper.remove();
-      // Если фото не осталось — убираем контейнер
       if (photosContainer && !photosContainer.querySelector(".mm-photo-thumb")) {
         photosContainer.remove();
-      }
-    }
-
-    // Обновляем кнопку «Добавить фото»
-    if (popup) {
-      var addBtn = popup.querySelector(".mm-add-photo-btn");
-      if (addBtn) {
-        var have = Math.max(0, Number(addBtn.getAttribute("data-have") || "0") - 1);
-        addBtn.setAttribute("data-have", String(have));
-      } else {
-        // Кнопка не была видна (лимит 12 был достигнут) — создаём
-        var placeIdEl = popup.querySelector(".mm-delete-btn[data-id], .mm-edit-btn[data-id]");
-        if (placeIdEl) {
-          var remainingThumbs = popup.querySelectorAll(".mm-photo-thumb").length;
-          var btnDiv = document.createElement("div");
-          btnDiv.style.marginTop = "6px";
-          var btn = document.createElement("button");
-          btn.className = "btn mm-add-photo-btn";
-          btn.setAttribute("data-id", placeIdEl.getAttribute("data-id"));
-          btn.setAttribute("data-have", String(remainingThumbs));
-          btn.textContent = "Добавить фото";
-          btnDiv.appendChild(btn);
-          var photosDiv = popup.querySelector("div[style*='flex-wrap']");
-          if (photosDiv) popup.insertBefore(btnDiv, photosDiv);
-        }
       }
     }
     return;
@@ -3709,9 +3835,20 @@ document.getElementById("mm-photo-input").addEventListener("change", async funct
   }
 });
 
-// Добавляет загруженные фото в открытый попап без refresh()
+// Добавляет загруженные фото в открытый попап/sidebar edit без refresh()
 function _updatePopupAfterUpload(placeId, newPhotos) {
   if (!newPhotos.length) return;
+
+  // Sidebar edit path: обновляем _currentPlaces + перерисовываем edit panel
+  if (_editingPlaceId) {
+    var p = _currentPlaces.find(x => x.id === Number(placeId));
+    if (p) {
+      if (!p.media) p.media = [];
+      for (var ph of newPhotos) p.media.push(ph);
+      renderEditPhotos(p);
+    }
+    return;
+  }
 
   var popup = document.querySelector(".maplibregl-popup-content .mm-popup");
   if (!popup) return;

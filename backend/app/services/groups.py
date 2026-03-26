@@ -173,7 +173,7 @@ class GroupService:
             return int(row[0])
 
         # Create; handle race by catching unique index violation (if two /me hit at once)
-        name = f"Личная карта {user.id}"
+        name = "Личная карта"
         g = Group(name=name, visibility="private", owner_id=user.id, is_personal=True)
         db.add(g)
         try:

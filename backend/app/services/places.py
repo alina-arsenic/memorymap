@@ -309,6 +309,7 @@ class PlaceService:
                 "moderation_status": place.moderation_status,
                 "media": media_map.get(place.id, []),
                 "group_visibility": group.visibility,
+                "group_name": group.name,
                 "group_is_personal": group.is_personal,
                 "has_report": place.id in report_place_ids,
                 "comments_count": comments_count_map.get(place.id, 0),

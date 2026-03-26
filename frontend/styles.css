@@ -719,14 +719,15 @@ html, body {
 
 .mm-popup {
     max-width: 300px;
+    min-width: 200px;
     max-height: 350px;
-    overflow: auto;
+    overflow-y: auto;
 }
 
 .mm-popup-title {
     font-weight: 600;
     font-size: 15px;
-    margin-bottom: 6px;
+    margin-bottom: 2px;
     overflow-wrap: break-word;
     color: #142E28;
 }
@@ -734,7 +735,10 @@ html, body {
 .mm-popup-note {
     white-space: pre-wrap;
     overflow-wrap: break-word;
-    line-height: 1.25;
+    line-height: 1.35;
+    font-size: 13px;
+    color: #2D5A4A;
+    margin-top: 6px;
 }
 
 /* ===== Mobile (Фаза 5) ===== */
@@ -780,11 +784,6 @@ html, body {
     overflow-y: auto;
     overflow-x: hidden;
 }
-
-.mm-edit-row { display:flex; align-items:center; gap:6px; }
-.mm-edit-btn { border:none; background:transparent; cursor:pointer; font-size:14px; padding:2px 4px; outline:none; }
-.mm-edit-btn:hover { opacity:0.7; }
-.mm-edit-btn:focus-visible { outline:2px solid #1B6B52; outline-offset:2px; border-radius:4px; }
 
 .mm-modal { position: fixed; inset:0; background: rgba(20,46,40,0.5); display:flex; align-items:center; justify-content:center; z-index:10000; }
 .mm-modal-card { width:min(520px, 92vw); background:#FFFDF8; border-radius:12px; padding:14px; box-shadow: 0 12px 40px rgba(20,46,40,0.25); }
@@ -930,8 +929,7 @@ html, body {
   background:#F0EBE3;
 }
 .mm-popup-menu-btn:focus-visible{
-  outline:2px solid #1B6B52;
-  outline-offset:2px;
+  outline:none;
 }
 .mm-popup-dropdown{
   display:none;
@@ -1522,3 +1520,69 @@ html, body {
 
 /* Гость не видит панель */
 .app.guest-mode .layer-cards-panel{ display:none !important; }
+
+/* ===== Бейдж слоя в попапе ===== */
+.mm-layer-badge{
+  display:inline-block;
+  font-size:11px;
+  padding:1px 8px;
+  border-radius:9999px;
+  background:#E8F0ED;
+  color:#1B6B52;
+  white-space:nowrap;
+  max-width:140px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  vertical-align:middle;
+}
+/* Метаданные попапа (автор + бейдж) */
+.mm-popup-meta{
+  margin-top:0;
+  margin-bottom:2px;
+  font-size:11px;
+  color:#6B8F7F;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
+  overflow-wrap:break-word;
+}
+
+/* ===== Компактный попап: inline «Развернуть» ===== */
+.mm-popup-expand{
+  border:none;
+  background:none;
+  color:#1B6B52;
+  font-size:12px;
+  font-weight:600;
+  cursor:pointer;
+  padding:0;
+  white-space:nowrap;
+  text-decoration:underline;
+  text-decoration-color:rgba(27,107,82,0.4);
+  text-underline-offset:2px;
+}
+.mm-popup-expand:hover{ text-decoration-color:#1B6B52; }
+
+/* ===== Компактный попап: сетка фото ===== */
+.mm-popup-photos{
+  margin-top:6px;
+  display:flex;
+  flex-wrap:nowrap;
+  gap:4px;
+}
+.mm-photo-more{
+  width:36px;
+  height:56px;
+  border-radius:6px;
+  background:#E8F0ED;
+  color:#1B6B52;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+  flex-shrink:0;
+}
+.mm-photo-more:hover{ background:#D6E8E0; }

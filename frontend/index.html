@@ -311,43 +311,79 @@
             </div>
           </div>
 
-          <!-- Таб: Место (добавление точек) -->
+          <!-- Таб: Место (добавление + редактирование точек) -->
           <div class="sidebar-tab-content" id="tab-place" style="display:none">
-            <div class="sidebar-section-title">Добавление точек</div>
-            <div class="hint" style="margin-bottom: 8px">
-              Нажмите <b>правой кнопкой мыши</b> по карте - появится временный желтый пин.
+            <!-- Секция добавления (существующая) -->
+            <div id="place-add-section">
+              <div class="sidebar-section-title">Добавление точек</div>
+              <div class="hint" style="margin-bottom: 8px">
+                Нажмите <b>правой кнопкой мыши</b> по карте - появится временный желтый пин.
+              </div>
+
+              <div class="field-label">Название</div>
+              <input id="web-title" class="input" placeholder="Или его отсутствие" />
+
+              <div class="field-label" style="margin-top: 6px">Описание</div>
+              <textarea
+                id="web-note"
+                class="input"
+                placeholder="Если есть желание - расскажите, что тут интересного"
+                rows="3"
+                style="resize: vertical"
+              ></textarea>
+
+              <div class="field-label" style="margin-top: 6px">Фотографии (до 12 шт.)</div>
+              <input id="web-photos" type="file" accept="image/*" multiple class="input" />
+              <div id="web-photos-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
+
+              <div class="field-label" style="margin-top: 6px">Куда добавить (слой)</div>
+              <select id="web-group" class="input"></select>
+
+              <div class="field-label" style="margin-top: 6px">Координаты</div>
+              <div id="web-coords" class="hint">ПКМ по карте, чтобы выбрать точку.</div>
+
+              <button class="btn btn-primary" style="margin-top: 8px; width: 100%" onclick="addWebPoint()">Добавить точку</button>
+
+              <div id="web-add-status" class="hint" style="margin-top: 6px">
+                Выберите место на карте правой кнопкой мыши.
+              </div>
+
+              <div class="hint" style="margin-top: 8px">
+                Также можно добавить точку, отправив геолокацию боту <b>@memorymap_bot</b>.
+              </div>
             </div>
 
-            <div class="field-label">Название</div>
-            <input id="web-title" class="input" placeholder="Или его отсутствие" />
+            <!-- Секция редактирования (скрыта по умолчанию) -->
+            <div id="place-edit-section" style="display:none">
+              <div style="display:flex;justify-content:space-between;align-items:center;
+                padding-bottom:8px;border-bottom:1px solid #D6CFC5;margin-bottom:8px;">
+                <span class="sidebar-section-title" style="margin:0">Редактирование</span>
+                <button class="settings-close-btn" onclick="closeEditPlace()">✕</button>
+              </div>
 
-            <div class="field-label" style="margin-top: 6px">Описание</div>
-            <textarea
-              id="web-note"
-              class="input"
-              placeholder="Если есть желание - расскажите, что тут интересного"
-              rows="3"
-              style="resize: vertical"
-            ></textarea>
+              <div class="field-label">Название</div>
+              <textarea id="edit-title" class="input" rows="1" maxlength="200"
+                style="resize:none;overflow:hidden"
+                oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();}"></textarea>
 
-            <div class="field-label" style="margin-top: 6px">Фотографии (до 12 шт.)</div>
-            <input id="web-photos" type="file" accept="image/*" multiple class="input" />
-            <div id="web-photos-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
+              <div class="field-label" style="margin-top:6px">Описание</div>
+              <textarea id="edit-note" class="input" rows="3" maxlength="5000"
+                style="resize:vertical"></textarea>
 
-            <div class="field-label" style="margin-top: 6px">Куда добавить (слой)</div>
-            <select id="web-group" class="input"></select>
+              <div class="field-label" style="margin-top:6px">Слой</div>
+              <select id="edit-group" class="input"></select>
 
-            <div class="field-label" style="margin-top: 6px">Координаты</div>
-            <div id="web-coords" class="hint">ПКМ по карте, чтобы выбрать точку.</div>
+              <div class="field-label" style="margin-top:6px">Фотографии</div>
+              <div id="edit-photos" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+              <div id="edit-photo-actions" style="margin-top:4px"></div>
 
-            <button class="btn btn-primary" style="margin-top: 8px; width: 100%" onclick="addWebPoint()">Добавить точку</button>
+              <div style="margin-top:10px;display:flex;gap:8px;">
+                <button class="btn btn-primary" style="flex:1" onclick="saveEditPlace()">Сохранить</button>
+                <button class="btn" style="flex:1" onclick="closeEditPlace()">Отмена</button>
+              </div>
 
-            <div id="web-add-status" class="hint" style="margin-top: 6px">
-              Выберите место на карте правой кнопкой мыши.
-            </div>
-
-            <div class="hint" style="margin-top: 8px">
-              Также можно добавить точку, отправив геолокацию боту <b>@memorymap_bot</b>.
+              <div id="edit-status" class="hint" style="margin-top:6px"></div>
             </div>
           </div>
 
