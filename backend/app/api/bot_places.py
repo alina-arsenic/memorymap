@@ -3,14 +3,14 @@ from app.core.deps import get_db
 from app.models.models import Media, Place, User
 from app.storage import detect_mime, move_to_place_folder, validate_temp_key
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/bot", tags=["bot"])
 
 class BotPlacePatch(BaseModel):
-    title: str | None = None
-    note: str | None = None
+    title: str | None = Field(None, max_length=200)
+    note: str | None = Field(None, max_length=5000)
     tg_id: int
 
 class BotLinkMedia(BaseModel):

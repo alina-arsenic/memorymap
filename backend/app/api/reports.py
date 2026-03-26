@@ -13,7 +13,7 @@ router = APIRouter()
 
 class ReportRequest(BaseModel):
     category: str
-    comment: str | None = None
+    comment: str | None = None  # max_length проверяется в ReportService
 
 
 @router.post("/places/{place_id}/report")

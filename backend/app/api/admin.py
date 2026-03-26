@@ -36,19 +36,21 @@ def list_users(
         raise HTTPException(status_code=403, detail="insufficient_role")
 
     users = db.query(User).order_by(User.id).all()
-    return {
-        "items": [
-            {
-                "id": u.id,
-                "login": u.login,
-                "email": u.email,
-                "role": u.role,
-                "tg_id": u.tg_id,
-                "email_verified": u.email_verified,
-            }
-            for u in users
-        ]
-    }
+    is_admin = current_user.role == "admin"
+    items = []
+    for u in users:
+        item = {
+            "id": u.id,
+            "login": u.login,
+            "role": u.role,
+        }
+        # PII (email, tg_id) — только для админа
+        if is_admin:
+            item["email"] = u.email
+            item["tg_id"] = u.tg_id
+            item["email_verified"] = u.email_verified
+        items.append(item)
+    return {"items": items}
 
 
 # ---------- Назначение роли ----------

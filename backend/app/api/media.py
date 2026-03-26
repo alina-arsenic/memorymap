@@ -1,13 +1,19 @@
+import re
 import uuid
 
 from app.core.auth import get_current_user
 from app.core.config import ALLOWED_IMAGE_EXTENSIONS, ALLOWED_IMAGE_MIMES, MEDIA_LIMIT_PER_PLACE
 from app.core.deps import get_db
-from app.models.models import Media, Place, User
+from app.models.models import Group, Media, Place, User
+from app.services.groups import GroupService
 from app.storage import delete_object, presign_get, presign_put
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+# Паттерны S3-ключей
+_PLACE_KEY_RE = re.compile(r"^places/(\d+)/[0-9a-f\-]{36}\.\w{1,5}$")
+_UPLOAD_KEY_RE = re.compile(r"^uploads/(\d+)/[0-9a-f\-]{36}\.\w{1,5}$")
 
 router = APIRouter()
 
@@ -43,9 +49,36 @@ def api_presign_upload(req: PresignUploadReq, current_user: User = Depends(get_c
 def presign_download(
     key: str = Query(...),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # Проверка прав доступа по формату ключа
+    place_match = _PLACE_KEY_RE.match(key)
+    upload_match = _UPLOAD_KEY_RE.match(key)
+
+    if place_match:
+        # places/{place_id}/... — проверяем доступ к группе
+        place_id = int(place_match.group(1))
+        place = db.query(Place).filter(Place.id == place_id).one_or_none()
+        if not place:
+            raise HTTPException(status_code=404, detail="place_not_found")
+        group = db.query(Group).filter(Group.id == place.group_id).one_or_none()
+        if not group:
+            raise HTTPException(status_code=404, detail="group_not_found")
+        try:
+            GroupService.require_can_view(db, current_user, group)
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="no_access")
+    elif upload_match:
+        # uploads/{user_id}/... — только владелец
+        owner_id = int(upload_match.group(1))
+        if owner_id != current_user.id:
+            raise HTTPException(status_code=403, detail="no_access")
+    else:
+        raise HTTPException(status_code=400, detail="invalid_key")
+
     url = presign_get(key)
     return {"url": url, "expires_in": 300}
 

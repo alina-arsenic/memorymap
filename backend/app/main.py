@@ -17,11 +17,21 @@ from app.api import (
     users,
 )
 from app.api import bot as bot_api
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 app = FastAPI(title="MemoryMap API")
+
+
+# Security headers
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response: Response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
 app.include_router(auth.router, prefix="/v1")
 app.include_router(bot_api.router, prefix="/v1")
 app.include_router(bot_places.router, prefix="/v1")

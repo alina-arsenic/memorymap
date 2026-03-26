@@ -32,8 +32,8 @@ class Group(Base):
 class Place(Base):
     __tablename__ = "places"
     id = Column(Integer, primary_key=True)
-    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     title = Column(Text)
     note = Column(Text)
@@ -53,6 +53,7 @@ class Media(Base):
     s3_key = Column(Text, nullable=False)
     mime = Column(Text)
     status = Column(Text, nullable=False, default="ready")  # pending|processing|ready|failed
+    created_at = Column(DateTime(timezone=True))
 
     place = relationship("Place", back_populates="media")
     user = relationship("User")
@@ -64,6 +65,7 @@ class Friend(Base):
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     friend_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     status = Column(Text, nullable=False, default="accepted")
+    created_at = Column(DateTime(timezone=True))
 
 class EmailVerificationCode(Base):
     """Одноразовый код подтверждения email (6 цифр, TTL из конфига)."""
@@ -74,6 +76,7 @@ class EmailVerificationCode(Base):
     code = Column(Text, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True))
 
     user = relationship("User")
 
@@ -99,6 +102,7 @@ class TelegramLinkCode(Base):
     code = Column(Text, nullable=False, unique=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True))
 
     user = relationship("User")
 

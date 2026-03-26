@@ -1,4 +1,7 @@
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 # PostgreSQL
 PG_HOST = os.getenv("POSTGRES_HOST", "db")
@@ -18,6 +21,8 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "http://api:8000")
 MEDIA_LIMIT_PER_PLACE = int(os.getenv("MEDIA_LIMIT_PER_PLACE", "12"))
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
+if not JWT_SECRET or JWT_SECRET == "dev-secret-change-me":
+    logger.warning("JWT_SECRET не задан — используется дефолтное значение. Задайте JWT_SECRET в .env для продакшена!")
 JWT_ALG = os.getenv("JWT_ALG", "HS256")
 JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "1440"))
 
