@@ -178,6 +178,8 @@ let _currentTab = "layers";
 
 function switchTab(tabName) {
   _currentTab = tabName;
+  // Закрыть панель карточек слоя при уходе с таба «Слои»
+  if (tabName !== "layers") closeLayerCardsPanel();
 
   // Обновить кнопки табов
   const tabs = document.querySelectorAll(".sidebar-tab");
@@ -958,6 +960,7 @@ function uiLogout() {
   switchTab("layers");
 
   // Закрыть все overlays
+  closeLayerCardsPanel();
   closeAuthModal();
   closeSettingsOverlay(true);
   closeHeaderDropdown();
@@ -1265,11 +1268,11 @@ function renderGroupLayersUI() {
   const parts = [];
 
   if (personalGroupId) {
-    const checked = selectedGroupLayerIds.has(personalGroupId) ? "checked" : "";
+    const eyeSvg = _layerEyeSvg(selectedGroupLayerIds.has(personalGroupId));
     parts.push(
-      `<div class="layer-row">
+      `<div class="layer-row" onclick="onLayerRowClick(event, ${personalGroupId})">
         <div class="left">
-          <input type="checkbox" data-group-id="${personalGroupId}" ${checked} onchange="toggleGroupLayer(${personalGroupId}, this.checked)">
+          ${eyeSvg(personalGroupId)}
           <div>
             <div class="name">Личная карта</div>
             <div class="meta">только вы</div>
@@ -1285,22 +1288,21 @@ function renderGroupLayersUI() {
   }
 
   for (const g of layerGroups) {
-    const checked = selectedGroupLayerIds.has(g.id) ? "checked" : "";
+    const eyeSvg = _layerEyeSvg(selectedGroupLayerIds.has(g.id));
     const name = escapeHtml(g.name || `Слой ${g.id}`);
     const visibility = g.visibility === "friends" ? "друзья" : "приватный";
     const role = g.my_role ? String(g.my_role) : "";
-    const canEdit = role === "owner";
     parts.push(
-      `<div class="layer-row">
+      `<div class="layer-row" onclick="onLayerRowClick(event, ${g.id})">
         <div class="left">
-          <input type="checkbox" data-group-id="${g.id}" ${checked} onchange="toggleGroupLayer(${g.id}, this.checked)">
+          ${eyeSvg(g.id)}
           <div style="min-width:0;">
             <div class="name">${name}</div>
             <div class="meta">${escapeHtml(visibility)}${role ? ` • ${escapeHtml(role)}` : ""}</div>
           </div>
         </div>
         <div class="actions">
-          ${`<button class="btn btn-ghost btn-icon" title="Открыть" onclick="openEditLayerModal(${g.id})">⚙</button>`}
+          <button class="btn btn-ghost btn-icon" title="Открыть" onclick="openEditLayerModal(${g.id})">⚙</button>
         </div>
       </div>`
     );
@@ -1314,10 +1316,25 @@ function renderGroupLayersUI() {
   renderFloatingLayersContent();
 }
 
-function toggleGroupLayer(groupId, isChecked) {
-  if (isChecked) selectedGroupLayerIds.add(groupId);
-  else selectedGroupLayerIds.delete(groupId);
+/** Возвращает функцию (groupId) => htmlString для SVG-иконки видимости */
+function _layerEyeSvg(isVisible) {
+  if (isVisible) {
+    return (gid) => `<svg class="layer-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" onclick="toggleGroupLayer(${gid})" title="Скрыть"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+  }
+  return (gid) => `<svg class="layer-eye layer-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" onclick="toggleGroupLayer(${gid})" title="Показать"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="2" y1="2" x2="22" y2="22"/></svg>`;
+}
+
+/** Клик по строке слоя — открыть панель карточек, если клик не по иконке видимости / кнопке настроек */
+function onLayerRowClick(event, groupId) {
+  if (event.target.closest(".layer-eye") || event.target.closest(".actions")) return;
+  openLayerCardsPanel(groupId);
+}
+
+function toggleGroupLayer(groupId) {
+  if (selectedGroupLayerIds.has(groupId)) selectedGroupLayerIds.delete(groupId);
+  else selectedGroupLayerIds.add(groupId);
   renderFloatingLayersContent();
+  renderGroupLayersUI();
   refresh();
 }
 
@@ -1396,7 +1413,7 @@ function openCreateLayerModal() {
 
   openLayersModal("Новый слой", `
     <div class="field-label">Название слоя</div>
-    <input id="layer-create-name" class="input" placeholder="Например: Поездки" />
+    <input id="layer-create-name" class="input" placeholder="Например: Поездки" maxlength="100" onkeydown="if(event.key==='Enter'){event.preventDefault();submitCreateLayer();}" />
 
     <div class="field-label" style="margin-top:10px;">Добавить редакторов (друзья)</div>
     <div style="max-height:220px;overflow:auto;border:1px solid #D6CFC5;border-radius:14px;padding:8px;">
@@ -1411,19 +1428,22 @@ function openCreateLayerModal() {
   `);
 }
 
+let _creatingLayer = false;
 async function submitCreateLayer() {
+  if (_creatingLayer) return;
   const statusEl = document.getElementById("layer-create-status");
   const nameEl = document.getElementById("layer-create-name");
   const name = (nameEl ? nameEl.value : "").trim();
-  if (!name) { if (statusEl) statusEl.innerText = "Введите название."; return; }
+  if (!name) { if (statusEl) { statusEl.style.color = ""; statusEl.innerText = "Введите название."; } return; }
 
+  _creatingLayer = true;
   const checked = Array.from(document.querySelectorAll(".layer-friend-checkbox"))
     .filter(x => x.checked)
     .map(x => Number(x.value))
     .filter(Boolean);
 
   try {
-    if (statusEl) statusEl.innerText = "Создаю слой…";
+    if (statusEl) { statusEl.style.color = ""; statusEl.innerText = "Создаю слой…"; }
     const resp = await apiFetch("/v1/groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1431,7 +1451,7 @@ async function submitCreateLayer() {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка: " + (data.detail || resp.status); }
       return;
     }
     const gid = data.id;
@@ -1452,7 +1472,9 @@ async function submitCreateLayer() {
     alert("Слой создан.");
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка сети."; }
+  } finally {
+    _creatingLayer = false;
   }
 }
 
@@ -1577,7 +1599,7 @@ async function openEditLayerModal(groupId) {
     const renameSection = isOwner ? `
       <div class="field-label">Переименовать</div>
       <div style="display:flex;gap:8px;align-items:center;">
-        <input id="layer-rename" class="input" value="${title}" style="flex:1;" />
+        <input id="layer-rename" class="input" value="${title}" style="flex:1;" maxlength="100" onkeydown="if(event.key==='Enter'){event.preventDefault();renameLayer(${groupId});}" />
         <button class="btn" onclick="renameLayer(${groupId})">Сохранить</button>
       </div>
     ` : ``;
@@ -1590,7 +1612,7 @@ async function openEditLayerModal(groupId) {
       <div id="layer-edit-status" class="hint" style="margin-top:10px;"></div>
       <div class="divider" style="margin:12px 0;"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
-        ${(!isPersonal && !isOwner) ? `<button class="btn" onclick="leaveLayer(${groupId})">Выйти из слоя</button>` : ``}
+        ${(!isPersonal && !isOwner) ? `<button class="btn" onclick="leaveLayer(${groupId}, ${data.place_count || 0})">Выйти из слоя</button>` : ``}
         ${(!isPersonal && isOwner) ? `<button class="btn btn-danger" onclick="deleteLayer(${groupId})">Удалить слой</button>` : ``}
       </div>
 
@@ -1602,11 +1624,14 @@ async function openEditLayerModal(groupId) {
   }
 }
 
+let _renamingLayer = false;
 async function renameLayer(groupId) {
+  if (_renamingLayer) return;
   const statusEl = document.getElementById("layer-edit-status");
   const inp = document.getElementById("layer-rename");
   const name = (inp ? inp.value : "").trim();
-  if (!name) { if (statusEl) statusEl.innerText = "Название не может быть пустым."; return; }
+  if (!name) { if (statusEl) { statusEl.style.color = ""; statusEl.innerText = "Название не может быть пустым."; } return; }
+  _renamingLayer = true;
   try {
     const resp = await apiFetch(`/v1/groups/${groupId}`, {
       method: "PATCH",
@@ -1615,16 +1640,23 @@ async function renameLayer(groupId) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка: " + (data.detail || resp.status); }
       return;
     }
     await refreshUserSnapshot();
     renderGroupLayersUI();
     populateAddGroupSelect();
-    if (statusEl) statusEl.innerText = "Сохранено.";
+    // Обновить заголовок панели карточек, если она открыта для этого слоя
+    if (_layerCardsPanelGroupId === groupId) {
+      const titleEl = document.getElementById("layer-cards-title");
+      if (titleEl) titleEl.textContent = name;
+    }
+    if (statusEl) { statusEl.style.color = ""; statusEl.innerText = "Сохранено."; }
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка сети."; }
+  } finally {
+    _renamingLayer = false;
   }
 }
 
@@ -1657,13 +1689,16 @@ async function addLayerMember(groupId) {
   }
 }
 
+let _sendingInvite = false;
 async function sendLayerInvite(groupId) {
+  if (_sendingInvite) return;
   const statusEl = document.getElementById("layer-edit-status");
   const userSel = document.getElementById("layer-add-user");
   const roleSel = document.getElementById("layer-add-role");
   const uid = userSel ? Number(userSel.value) : null;
   const role = roleSel ? roleSel.value : "editor";
   if (!uid) return;
+  _sendingInvite = true;
   try {
     const resp = await apiFetch(`/v1/groups/${groupId}/invites`, {
       method: "POST",
@@ -1672,19 +1707,21 @@ async function sendLayerInvite(groupId) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка: " + (data.detail || resp.status); }
       return;
     }
     if (data.status === "already_pending") {
-      if (statusEl) statusEl.innerText = "Приглашение уже отправлено.";
+      if (statusEl) { statusEl.style.color = ""; statusEl.innerText = "Приглашение уже отправлено."; }
       return;
     }
-    if (statusEl) statusEl.innerText = "Приглашение отправлено.";
+    if (statusEl) { statusEl.style.color = ""; statusEl.innerText = "Приглашение отправлено."; }
     // Обновляем модалку чтобы показать pending-инвайт
     openEditLayerModal(groupId);
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка сети."; }
+  } finally {
+    _sendingInvite = false;
   }
 }
 
@@ -1694,13 +1731,13 @@ async function cancelGroupInvite(inviteId, groupId) {
     const resp = await apiFetch(`/v1/groups/invites/${inviteId}`, { method: "DELETE" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка: " + (data.detail || resp.status); }
       return;
     }
     openEditLayerModal(groupId);
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка сети."; }
   }
 }
 
@@ -1712,7 +1749,7 @@ async function removeLayerMember(groupId, userId, displayName) {
     const resp = await apiFetch(`/v1/groups/${groupId}/members/${userId}`, { method: "DELETE" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка: " + (data.detail || resp.status); }
       return;
     }
     await refreshUserSnapshot();
@@ -1721,7 +1758,7 @@ async function removeLayerMember(groupId, userId, displayName) {
     openEditLayerModal(groupId);
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка сети."; }
   }
 }
 
@@ -1735,14 +1772,14 @@ async function changeLayerMemberRole(groupId, userId, role) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      if (statusEl) statusEl.innerText = "Ошибка: " + (data.detail || resp.status);
+      if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка: " + (data.detail || resp.status); }
       return;
     }
     await refreshUserSnapshot();
     openEditLayerModal(groupId);
   } catch (e) {
     console.error(e);
-    if (statusEl) statusEl.innerText = "Ошибка сети.";
+    if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка сети."; }
   }
 }
 
@@ -1784,7 +1821,7 @@ document.addEventListener("keydown", (e) => {
       closeHeaderDropdown();
       return;
     }
-    // Приоритет 3: popup dropdown-меню (report + comment + friends)
+    // Приоритет 4: popup dropdown-меню (report + comment + friends)
     const openDropdowns = document.querySelectorAll(".mm-popup-dropdown.open");
     if (openDropdowns.length) {
       openDropdowns.forEach(el => el.classList.remove("open"));
@@ -1846,6 +1883,11 @@ document.addEventListener("keydown", (e) => {
     const frOverlay = document.getElementById("modal-overlay");
     if (frOverlay && frOverlay.style.display !== "none") {
       closeFriendRequestsModal();
+      return;
+    }
+    // Приоритет 12: панель карточек слоя
+    if (_layerCardsPanelGroupId !== null) {
+      closeLayerCardsPanel();
       return;
     }
   }
@@ -2371,7 +2413,11 @@ async function declineFriendRequest(requestId) {
   }
 }
 
+let _processingInvites = new Set();
+
 async function acceptGroupInvite(inviteId) {
+  if (_processingInvites.has(inviteId)) return;
+  _processingInvites.add(inviteId);
   try {
     const resp = await apiFetch(`/v1/groups/invites/${inviteId}/accept`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
@@ -2387,10 +2433,14 @@ async function acceptGroupInvite(inviteId) {
   } catch (e) {
     console.error(e);
     alert("Ошибка сети.");
+  } finally {
+    _processingInvites.delete(inviteId);
   }
 }
 
 async function declineGroupInvite(inviteId) {
+  if (_processingInvites.has(inviteId)) return;
+  _processingInvites.add(inviteId);
   try {
     const resp = await apiFetch(`/v1/groups/invites/${inviteId}/decline`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
@@ -2403,6 +2453,8 @@ async function declineGroupInvite(inviteId) {
   } catch (e) {
     console.error(e);
     alert("Ошибка сети.");
+  } finally {
+    _processingInvites.delete(inviteId);
   }
 }
 
@@ -2533,6 +2585,7 @@ const body = {
 
     // обновляем маркеры
     refresh();
+    refreshLayerCardsPanel();
 } catch (err) {
     console.error(err);
     if (statusEl) {
@@ -2656,11 +2709,8 @@ class LayersFloatingControl {
         const gid = Number(cb.dataset.floatGroup);
         if (cb.checked) selectedGroupLayerIds.add(gid);
         else selectedGroupLayerIds.delete(gid);
-        // Синхронизация sidebar checkbox
-        const sbCb = document.querySelector(
-          `#group-layers-list input[data-group-id="${gid}"]`
-        );
-        if (sbCb) sbCb.checked = cb.checked;
+        // Обновить иконку видимости в sidebar
+        renderGroupLayersUI();
       }
       // Обновить _prevFloatingLayersHtml без innerHTML (защита от мерцания при setInterval)
       _prevFloatingLayersHtml = buildFloatingLayersHtml();
@@ -2722,7 +2772,7 @@ function buildFloatingLayersHtml() {
       const isPersonal = personalGroupId && g.id === personalGroupId;
       const name = isPersonal ? "Личная карта" : escapeHtml(g.name || `Слой ${g.id}`);
       html += `<label class="mm-layers-float-item">
-        <input type="checkbox" data-float-group="${g.id}"${checked}> ${name}
+        <input type="checkbox" data-float-group="${g.id}"${checked}> <span class="mm-layers-float-name">${name}</span>
       </label>`;
     }
   }
@@ -3185,6 +3235,9 @@ async function refresh() {
     const marker = markersByPlaceId[pendingPopupPlaceId];
     if (marker) {
       marker.togglePopup();
+      // Убрать автофокус с кнопок попапа (иначе синяя рамка на троеточии/карандаше)
+      document.activeElement?.blur();
+      requestAnimationFrame(() => document.activeElement?.blur());
       // Автооткрытие комментариев из уведомления
       if (pendingCommentId !== null) {
         const pId = pendingPopupPlaceId;
@@ -3241,6 +3294,7 @@ document.addEventListener("click", async (e) => {
 
       // обновляем карту
       refresh();
+      refreshLayerCardsPanel();
   } catch (err) {
       console.error(err);
       alert("Ошибка соединения при удалении точки.");
@@ -3291,6 +3345,7 @@ document.addEventListener("click", async (e) => {
   }
 
   refresh();
+  refreshLayerCardsPanel();
 });
 
 // ========= Фото-галерея (lightbox) =========
@@ -4876,9 +4931,16 @@ map.on("moveend", () => {
 });
 
 // --- Layer destructive actions ---
-async function leaveLayer(groupId) {
+let _leavingLayer = false;
+async function leaveLayer(groupId, placeCount) {
+  if (_leavingLayer) return;
   if (!accessToken) { alert("Сначала войдите."); return; }
-  if (!confirm("Точно выйти из слоя?")) return;
+  const pc = Number(placeCount) || 0;
+  const msg = pc > 0
+    ? `В слое ${pc} ${pluralRu(pc, "точка", "точки", "точек")}. Они останутся в слое, но вы потеряете к ним доступ. Выйти?`
+    : "Точно выйти из слоя?";
+  if (!confirm(msg)) return;
+  _leavingLayer = true;
   try {
     const resp = await apiFetch(`/v1/groups/${groupId}/leave`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
@@ -4886,6 +4948,7 @@ async function leaveLayer(groupId) {
       alert("Не удалось выйти: " + (data.detail || resp.status));
       return;
     }
+    if (_layerCardsPanelGroupId === groupId) closeLayerCardsPanel();
     await refreshUserSnapshot();
     if (selectedGroupLayerIds.has(groupId)) selectedGroupLayerIds.delete(groupId);
     renderGroupLayersUI();
@@ -4895,10 +4958,14 @@ async function leaveLayer(groupId) {
   } catch (e) {
     console.error(e);
     alert("Ошибка сети.");
+  } finally {
+    _leavingLayer = false;
   }
 }
 
+let _deletingLayer = false;
 async function deleteLayer(groupId) {
+  if (_deletingLayer) return;
   if (!accessToken) { alert("Сначала войдите."); return; }
   let name = `слой ${groupId}`;
   try {
@@ -4907,6 +4974,7 @@ async function deleteLayer(groupId) {
   } catch (_) {}
 
   if (!confirm(`Точно хотите удалить слой "${name}"? Все точки этого слоя будут удалены.`)) return;
+  _deletingLayer = true;
   try {
     const resp = await apiFetch(`/v1/groups/${groupId}`, { method: "DELETE" });
     const data = await resp.json().catch(() => ({}));
@@ -4914,6 +4982,7 @@ async function deleteLayer(groupId) {
       alert("Не удалось удалить слой: " + (data.detail || resp.status));
       return;
     }
+    if (_layerCardsPanelGroupId === groupId) closeLayerCardsPanel();
     await refreshUserSnapshot();
     if (selectedGroupLayerIds.has(groupId)) selectedGroupLayerIds.delete(groupId);
     renderGroupLayersUI();
@@ -4923,5 +4992,117 @@ async function deleteLayer(groupId) {
   } catch (e) {
     console.error(e);
     alert("Ошибка сети.");
+  } finally {
+    _deletingLayer = false;
   }
+}
+
+// ===================== Панель карточек слоя =====================
+
+let _layerCardsPanelGroupId = null;
+
+/** Открыть/закрыть панель с карточками точек слоя (toggle) */
+async function openLayerCardsPanel(groupId) {
+  // Toggle: повторный клик закрывает
+  if (_layerCardsPanelGroupId === groupId) {
+    closeLayerCardsPanel();
+    return;
+  }
+
+  const panel = document.getElementById("layer-cards-panel");
+  const titleEl = document.getElementById("layer-cards-title");
+  const listEl = document.getElementById("layer-cards-list");
+  if (!panel || !listEl) return;
+
+  // Определяем название слоя
+  const g = ((currentUser && currentUser.groups) || []).find(x => x.id === groupId);
+  const layerName = (personalGroupId && groupId === personalGroupId)
+    ? "Личная карта"
+    : (g ? (g.name || `Слой ${groupId}`) : `Слой ${groupId}`);
+  if (titleEl) titleEl.textContent = layerName;
+
+  _layerCardsPanelGroupId = groupId;
+  listEl.innerHTML = '<div class="hint" style="text-align:center;padding:20px;">Загрузка…</div>';
+  panel.style.display = "";
+  document.querySelector(".app")?.classList.add("layer-panel-open");
+
+  try {
+    const resp = await apiFetch(`/v1/places/feed?group_ids=${groupId}&bbox=-180,-90,180,90`);
+    if (!resp.ok) {
+      listEl.innerHTML = '<div class="hint" style="text-align:center;padding:20px;">Ошибка загрузки.</div>';
+      return;
+    }
+    const data = await resp.json().catch(() => ({}));
+    const places = Array.isArray(data.items) ? data.items : [];
+
+    // Проверяем что панель всё ещё открыта для этого слоя (мог закрыть пока шёл запрос)
+    if (_layerCardsPanelGroupId !== groupId) return;
+
+    if (places.length === 0) {
+      listEl.innerHTML = '<div class="hint" style="text-align:center;padding:20px;">В этом слое пока нет точек.</div>';
+      return;
+    }
+
+    listEl.innerHTML = places.map(p => {
+      const title = escapeHtml(p.title || `${Number(p.lat).toFixed(5)}, ${Number(p.lon).toFixed(5)}`);
+      const note = p.note ? escapeHtml(p.note) : "";
+      const author = escapeHtml(p.user_login || "");
+      const media = Array.isArray(p.media) ? p.media : [];
+      const thumb = media.length > 0 ? media[0].url : null;
+      const thumbHtml = thumb
+        ? `<img class="layer-place-card-thumb" src="${escapeHtml(thumb)}" loading="lazy" />`
+        : "";
+      return `<div class="layer-place-card" onclick="flyToPlace(${p.id}, ${p.lon}, ${p.lat})">
+        <div style="display:flex;gap:10px;">
+          ${thumbHtml}
+          <div style="min-width:0;flex:1;">
+            <div class="layer-place-card-title">${title}</div>
+            ${note ? `<div class="layer-place-card-note">${note}</div>` : ""}
+            ${author ? `<div class="layer-place-card-author">${author}</div>` : ""}
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    console.error(e);
+    if (_layerCardsPanelGroupId === groupId) {
+      listEl.innerHTML = '<div class="hint" style="text-align:center;padding:20px;">Ошибка сети.</div>';
+    }
+  }
+}
+
+function closeLayerCardsPanel() {
+  _layerCardsPanelGroupId = null;
+  const panel = document.getElementById("layer-cards-panel");
+  if (panel) panel.style.display = "none";
+  document.querySelector(".app")?.classList.remove("layer-panel-open");
+}
+
+/** Обновить панель карточек если открыта (без toggle) */
+function refreshLayerCardsPanel() {
+  if (_layerCardsPanelGroupId !== null) {
+    const gid = _layerCardsPanelGroupId;
+    _layerCardsPanelGroupId = null; // сброс чтобы openLayerCardsPanel не сделал toggle
+    openLayerCardsPanel(gid);
+  }
+}
+
+/** Перелететь к точке и открыть попап */
+function flyToPlace(placeId, lon, lat) {
+  pendingPopupPlaceId = placeId;
+  // Гарантируем включение группы в feed-запрос (если видимость слоя выключена)
+  pendingPopupGroupId = _layerCardsPanelGroupId || null;
+  // padding.top сдвигает точку в нижнюю часть карты — попап не вылезает за header
+  map.flyTo({ center: [lon, lat], zoom: 16, padding: { top: 220 } });
+  // Fallback: если карта уже на месте, flyTo не вызовет moveend
+  setTimeout(() => {
+    if (pendingPopupPlaceId !== null) refresh();
+  }, 800);
+  // Страховка: сбросить pending через 5 секунд если попап так и не открылся
+  setTimeout(() => {
+    if (pendingPopupPlaceId === placeId) {
+      pendingPopupPlaceId = null;
+      pendingPopupGroupId = null;
+    }
+  }, 5000);
 }

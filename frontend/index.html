@@ -380,6 +380,15 @@
         </div>
       </aside>
 
+      <!-- Панель карточек слоя (появляется при клике по названию слоя) -->
+      <div id="layer-cards-panel" class="layer-cards-panel" style="display:none">
+        <div class="layer-cards-header">
+          <span id="layer-cards-title" class="layer-cards-title"></span>
+          <button class="settings-close-btn" onclick="closeLayerCardsPanel()">✕</button>
+        </div>
+        <div id="layer-cards-list" class="layer-cards-list"></div>
+      </div>
+
       <!-- MAP -->
       <main class="map-wrapper">
         <div id="map"></div>

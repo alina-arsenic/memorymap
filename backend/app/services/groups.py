@@ -106,7 +106,8 @@ class GroupService:
         members = [
             {"id": r[0], "login": r[1], "username": r[2], "role": r[3]} for r in rows
         ]
-        return {"id": g.id, "name": g.name, "visibility": g.visibility, "is_personal": getattr(g, "is_personal", False), "owner_id": getattr(g, "owner_id", None), "my_role": my_role, "members": members}
+        pc = db.execute(text("SELECT COUNT(*) FROM places WHERE group_id=:gid"), {"gid": group_id}).scalar() or 0
+        return {"id": g.id, "name": g.name, "visibility": g.visibility, "is_personal": getattr(g, "is_personal", False), "owner_id": getattr(g, "owner_id", None), "my_role": my_role, "members": members, "place_count": pc}
 
     @staticmethod
     def rename_group(db: Session, owner: User, group_id: int, name: str) -> None:

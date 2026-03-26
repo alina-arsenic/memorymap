@@ -110,6 +110,11 @@ class GroupInviteService:
         if invite.status != "pending":
             return {"status": invite.status}
 
+        # Проверка блокировки (в любом направлении)
+        from app.services.blocks import BlockService
+        if BlockService.is_either_blocked(db, invite.from_user_id, user.id):
+            raise ValueError("Приглашение недействительно: пользователь заблокирован")
+
         # Проверка: отправитель ещё друг (дружба могла быть удалена)
         if not FriendsService.are_friends(db, invite.from_user_id, user.id):
             raise ValueError("Приглашение недействительно: вы больше не друзья с отправителем")

@@ -45,11 +45,16 @@ def create_group(
 ):
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if not g.name or not g.name.strip():
+    name = (g.name or "").strip()
+    if not name:
         raise HTTPException(status_code=400, detail="empty_name")
+    if g.visibility not in ("private", "friends", "public"):
+        raise HTTPException(status_code=400, detail="invalid_visibility")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="name_too_long")
 
     gid = GroupService.create_group(
-        db, owner=current_user, name=g.name, visibility=g.visibility, add_friends=g.add_friends
+        db, owner=current_user, name=name, visibility=g.visibility, add_friends=g.add_friends
     )
     return {"id": gid}
 
@@ -82,6 +87,8 @@ def rename_group(
     name = (req.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="empty_name")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="name_too_long")
     try:
         GroupService.rename_group(db, current_user, group_id, name)
         return {"status": "ok"}

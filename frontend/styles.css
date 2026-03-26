@@ -551,6 +551,11 @@ html, body {
     border-radius: 14px;
     margin-bottom: 6px;
     background: #FFFDF8;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.layer-row:hover {
+    background: #F0EBE3;
 }
 
 .layer-row .left {
@@ -706,6 +711,11 @@ html, body {
     border-radius: 12px;
     box-shadow: 0 4px 16px rgba(20,46,40,0.15);
 }
+/* Убрать focus ring при программном открытии попапа — оставить только для клавиатурной навигации */
+.maplibregl-popup-content button:focus:not(:focus-visible),
+.maplibregl-popup-content a:focus:not(:focus-visible){
+    outline:none;
+}
 
 .mm-popup {
     max-width: 300px;
@@ -772,8 +782,9 @@ html, body {
 }
 
 .mm-edit-row { display:flex; align-items:center; gap:6px; }
-.mm-edit-btn { border:none; background:transparent; cursor:pointer; font-size:14px; padding:2px 4px; }
+.mm-edit-btn { border:none; background:transparent; cursor:pointer; font-size:14px; padding:2px 4px; outline:none; }
 .mm-edit-btn:hover { opacity:0.7; }
+.mm-edit-btn:focus-visible { outline:2px solid #1B6B52; outline-offset:2px; border-radius:4px; }
 
 .mm-modal { position: fixed; inset:0; background: rgba(20,46,40,0.5); display:flex; align-items:center; justify-content:center; z-index:10000; }
 .mm-modal-card { width:min(520px, 92vw); background:#FFFDF8; border-radius:12px; padding:14px; box-shadow: 0 12px 40px rgba(20,46,40,0.25); }
@@ -913,9 +924,14 @@ html, body {
   padding:2px 6px;
   border-radius:6px;
   color:#6B8F7F;
+  outline:none;
 }
 .mm-popup-menu-btn:hover{
   background:#F0EBE3;
+}
+.mm-popup-menu-btn:focus-visible{
+  outline:2px solid #1B6B52;
+  outline-offset:2px;
 }
 .mm-popup-dropdown{
   display:none;
@@ -1379,6 +1395,7 @@ html, body {
   padding:6px 12px;
   font-size:13px;
   cursor:pointer;
+  min-width:0;
 }
 .mm-layers-float-item:hover{
   background:#F0EBE3;
@@ -1386,4 +1403,122 @@ html, body {
 .mm-layers-float-item input[type="checkbox"]{
   margin:0;
   accent-color:#1B6B52;
+  flex-shrink:0;
 }
+.mm-layers-float-name{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  min-width:0;
+}
+
+/* ===== Иконка видимости слоя в сайдбаре ===== */
+.layer-eye{
+  cursor:pointer;
+  width:28px;
+  height:28px;
+  padding:4px;
+  margin:-4px;
+  border-radius:4px;
+  color:#6B8F7F;
+  flex-shrink:0;
+  transition:color 0.15s;
+}
+.layer-eye:hover{ color:#142E28; }
+.layer-eye-off{ color:#C5D1CC; }
+.layer-eye-off:hover{ color:#8FA89C; }
+
+/* ===== Панель карточек слоя ===== */
+.layer-cards-panel{
+  position:fixed;
+  top:48px;      /* высота header */
+  left:280px;    /* ширина sidebar */
+  bottom:0;
+  width:300px;
+  background:#FAF6F0;
+  border-right:1px solid #D6CFC5;
+  box-shadow:4px 0 12px rgba(20,46,40,0.08);
+  z-index:50;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.layer-cards-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 16px;
+  border-bottom:1px solid #D6CFC5;
+  flex-shrink:0;
+}
+.layer-cards-title{
+  font-weight:600;
+  font-size:15px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#142E28;
+}
+.layer-cards-list{
+  flex:1;
+  overflow-y:auto;
+  padding:8px;
+}
+.layer-place-card{
+  padding:12px;
+  border-radius:8px;
+  cursor:pointer;
+  transition:background 0.15s;
+}
+.layer-place-card:hover{ background:#F0EBE3; }
+.layer-place-card + .layer-place-card{ border-top:1px solid #E8E0D4; }
+.layer-place-card-title{
+  font-weight:500;
+  font-size:14px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#142E28;
+}
+.layer-place-card-note{
+  font-size:12px;
+  color:#6B8F7F;
+  margin-top:2px;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+.layer-place-card-author{
+  font-size:11px;
+  color:#8FA89C;
+  margin-top:4px;
+}
+.layer-place-card-thumb{
+  width:48px;
+  height:48px;
+  object-fit:cover;
+  border-radius:6px;
+  flex-shrink:0;
+  border:1px solid #D6CFC5;
+}
+
+/* Мобильный: панель заменяет сайдбар */
+@media (max-width:800px){
+  .layer-cards-panel{
+    left:0;
+    width:100%;
+    top:48px;
+    bottom:auto;
+    max-height:45vh;
+    max-height:45svh;
+    border-right:none;
+    border-bottom:1px solid #D6CFC5;
+    border-radius:0;
+    box-shadow:0 4px 12px rgba(20,46,40,0.1);
+  }
+  .app.layer-panel-open .sidebar{ display:none; }
+}
+
+/* Гость не видит панель */
+.app.guest-mode .layer-cards-panel{ display:none !important; }
