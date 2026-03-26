@@ -395,6 +395,7 @@ async function loadMe() {
   applyAuthUI(true);
 
   // Telegram UI
+  const tgUnlinkBtn = document.getElementById("tg-unlink-btn");
   if (currentUser.tg_id) {
     if (tgStatus) tgStatus.innerText = currentUser.username
       ? `Подключён: @${currentUser.username}`
@@ -402,12 +403,14 @@ async function loadMe() {
     if (tgBtn) tgBtn.style.display = "none";
     if (tgHint) tgHint.style.display = "none";
     if (tgCode) { tgCode.innerText = ""; tgCode.style.display = "none"; }
+    if (tgUnlinkBtn) tgUnlinkBtn.style.display = "";
   } else {
     if (tgStatus) tgStatus.innerText = "Не подключён";
     // не показываем кнопку если уже идёт процесс привязки (код сгенерирован)
     const linkingInProgress = tgCode && tgCode.style.display !== "none" && tgCode.innerHTML.trim() !== "";
     if (tgBtn && !linkingInProgress) tgBtn.style.display = "";
     if (tgHint) tgHint.style.display = "";
+    if (tgUnlinkBtn) tgUnlinkBtn.style.display = "none";
   }
 
   // Таб модерации — показываем только admin и moderator
@@ -1111,6 +1114,7 @@ async function startTelegramLink() {
     if (!resp.ok) {
       const txt = await resp.text().catch(() => "");
       if (tgCode) tgCode.innerText = `Ошибка генерации кода (${resp.status}). ${txt}`;
+      _linkingTelegram = false;
       return;
     }
 
@@ -1152,6 +1156,33 @@ async function startTelegramLink() {
     console.error(e);
     if (tgCode) tgCode.innerText = "Ошибка сети при генерации кода.";
     _linkingTelegram = false;
+  }
+}
+
+let _unlinkingTelegram = false;
+async function unlinkTelegram() {
+  if (_unlinkingTelegram) return;
+  if (!confirm("Отвязать Telegram от аккаунта?")) return;
+  _unlinkingTelegram = true;
+  try {
+    const resp = await apiFetch("/v1/me/telegram", { method: "DELETE" });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.detail === "set_password_first") {
+        alert("Сначала установите пароль в настройках, иначе вы не сможете войти в аккаунт.");
+      } else if (data.detail === "telegram_not_linked") {
+        alert("Telegram уже отвязан.");
+      } else {
+        alert(data.detail || "Ошибка отвязки.");
+      }
+      return;
+    }
+    await loadMe();
+  } catch (e) {
+    console.error(e);
+    alert("Ошибка сети.");
+  } finally {
+    _unlinkingTelegram = false;
   }
 }
 

@@ -112,9 +112,13 @@ def telegram_link_start(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     code = secrets.token_urlsafe(8)  # короткий код
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=TELEGRAM_LINK_CODE_TTL_MINUTES)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=TELEGRAM_LINK_CODE_TTL_MINUTES)
 
-    row = TelegramLinkCode(user_id=current_user.id, code=code, expires_at=expires_at, used_at=None)
+    row = TelegramLinkCode(
+        user_id=current_user.id, code=code, expires_at=expires_at,
+        used_at=None, created_at=now,
+    )
     db.add(row)
     db.commit()
 
@@ -127,6 +131,34 @@ def telegram_link_start(
         "bot_link": bot_link,
         "expires_in_minutes": TELEGRAM_LINK_CODE_TTL_MINUTES,
     }
+
+
+# ---------- Отвязка Telegram ----------
+
+@router.delete("/me/telegram")
+def unlink_telegram(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Отвязка Telegram от аккаунта."""
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # re-query (current_user expunged)
+    user = db.query(User).filter(User.id == current_user.id).one()
+
+    if user.tg_id is None:
+        raise HTTPException(status_code=400, detail="telegram_not_linked")
+
+    # Защита от залочки: нельзя отвязать TG, если нет пароля (иначе не войти)
+    if not user.password_hash:
+        raise HTTPException(status_code=400, detail="set_password_first")
+
+    user.tg_id = None
+    user.username = None
+    db.commit()
+
+    return {"status": "ok"}
 
 
 def _do_delete_account(user: User, db: Session) -> dict:

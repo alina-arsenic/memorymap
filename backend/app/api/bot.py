@@ -74,17 +74,31 @@ def bot_list_groups(
     all_groups = GroupService.list_groups(db, user)
 
     # Оставляем только группы, куда пользователь может добавлять точки:
-    # публичные + те, где роль owner или editor
+    # - те, где юзер участник (owner/editor)
+    # - общий публичный слой "Public map" (id=1) — всегда доступен всем
     items = []
     for g in all_groups:
         role = g.get("my_role")
-        vis = g.get("visibility")
-        if vis == "public" or role in ("owner", "editor"):
+        if role in ("owner", "editor") or g["id"] == 1:
             items.append({
                 "id": g["id"],
                 "name": g["name"],
                 "is_personal": g.get("is_personal", False),
             })
+
+    # Автосоздание личного слоя, если у пользователя нет ни одной группы
+    if not items:
+        GroupService.ensure_personal_group(db, user)
+        # Повторяем запрос после создания
+        all_groups = GroupService.list_groups(db, user)
+        for g in all_groups:
+            role = g.get("my_role")
+            if role in ("owner", "editor") or g["id"] == 1:
+                items.append({
+                    "id": g["id"],
+                    "name": g["name"],
+                    "is_personal": g.get("is_personal", False),
+                })
 
     return {"items": items}
 
@@ -120,3 +134,62 @@ def bot_presign_upload(
     fname = f"uploads/{place.user_id}/{uuid.uuid4()}.{ext}"
     url = presign_put(fname, req.mime)
     return {"key": fname, "url": url, "expires_in": 600}
+
+
+# ---------- POST /bot/groups — создание слоя из бота ----------
+
+class BotCreateGroupReq(BaseModel):
+    tg_id: int
+    name: str
+    visibility: str = "private"
+
+
+@router.post("/bot/groups")
+def bot_create_group(
+    req: BotCreateGroupReq,
+    x_bot_secret: str | None = Header(default=None, alias="X-Bot-Secret"),
+    db: Session = Depends(get_db),
+):
+    """Создание нового слоя из Telegram-бота."""
+    if not BOT_API_SECRET or x_bot_secret != BOT_API_SECRET:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    user = db.query(User).filter(User.tg_id == req.tg_id).one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="telegram_not_linked")
+
+    name = (req.name or "").strip()
+    if not name or len(name) > 100:
+        raise HTTPException(status_code=400, detail="invalid_name")
+
+    if req.visibility not in ("private", "public"):
+        raise HTTPException(status_code=400, detail="invalid_visibility")
+
+    gid = GroupService.create_group(db, user, name, req.visibility)
+    return {"id": gid, "name": name}
+
+
+# ---------- DELETE /bot/unlink-telegram ----------
+
+@router.delete("/bot/unlink-telegram")
+def bot_unlink_telegram(
+    tg_id: int = Query(...),
+    x_bot_secret: str | None = Header(default=None, alias="X-Bot-Secret"),
+    db: Session = Depends(get_db),
+):
+    """Отвязка Telegram через бота."""
+    if not BOT_API_SECRET or x_bot_secret != BOT_API_SECRET:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    user = db.query(User).filter(User.tg_id == tg_id).one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="telegram_not_linked")
+
+    # Защита: нельзя отвязать если нет пароля (иначе пользователь не войдёт)
+    if not user.password_hash:
+        raise HTTPException(status_code=400, detail="set_password_first")
+
+    user.tg_id = None
+    user.username = None
+    db.commit()
+    return {"status": "ok"}
