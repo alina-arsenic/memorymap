@@ -13,6 +13,7 @@ let _editingPlaceId = null; // id точки, редактируемой в side
 let _savingEdit = false; // защита от двойного клика «Сохранить»
 let _popupNeedsPersistence = false; // попап не влез на экран — сохранять при перемещении карты
 let _pendingPopupFromPersistence = false; // pendingPopupPlaceId установлен из persistence (не из flyTo)
+let _pendingSharePlaceId = null; // ID точки из share-ссылки (?place=123)
 
 let tempMarker = null; // временный желтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
@@ -486,6 +487,8 @@ async function uiLogin() {
     localStorage.setItem(LS_TOKEN, accessToken);
     await loadMe();
     refresh();
+    // Retry share-ссылки после логина (если была ?place= до авторизации)
+    await tryOpenSharedPlace();
   } catch (e) {
     alert("Ошибка сети. Попробуйте ещё раз.");
   } finally {
@@ -3173,6 +3176,8 @@ async function refresh() {
 
       // Единый ⋯ меню: пункты зависят от роли
       const menuItems = [];
+      // Кнопка «Поделиться» — для всех точек (копирует ссылку в буфер обмена)
+      menuItems.push(`<button class="mm-popup-dropdown-item mm-popup-dropdown-item--default" onclick="sharePlace(${p.id});event.stopPropagation();">Поделиться</button>`);
       if (p.isMine) {
         menuItems.push(`<button class="mm-popup-dropdown-item mm-popup-dropdown-item--default" onclick="openEditPlace(${p.id})">Редактировать</button>`);
         menuItems.push(`<button class="mm-popup-dropdown-item mm-popup-dropdown-item--danger" onclick="confirmDeletePlace(${p.id})">Удалить</button>`);
@@ -4051,6 +4056,63 @@ function showPlaceOnMap(placeId, lon, lat, groupId) {
       pendingPopupGroupId = null;
     }
   }, 5000);
+}
+
+/** Показать кратковременное уведомление внизу экрана */
+function showToast(msg) {
+  const el = document.createElement("div");
+  el.textContent = msg;
+  el.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 20px;border-radius:8px;z-index:10000;font-size:14px;pointer-events:none;";
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+/** Копировать ссылку на точку в буфер обмена */
+async function sharePlace(placeId) {
+  // Закрываем dropdown
+  document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
+  const url = `${location.origin}/?place=${placeId}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast("Ссылка скопирована");
+  } catch {
+    // fallback для HTTP или старых браузеров
+    prompt("Скопируйте ссылку:", url);
+  }
+}
+
+/** Попытка открыть точку из share-ссылки */
+async function tryOpenSharedPlace() {
+  if (!_pendingSharePlaceId) return;
+  try {
+    const resp = await apiFetch(`/v1/places/${encodeURIComponent(_pendingSharePlaceId)}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      _pendingSharePlaceId = null;
+      history.replaceState(null, "", location.pathname);
+      showPlaceOnMap(data.id, data.lon, data.lat, data.group_id);
+    } else if (resp.status === 403) {
+      if (accessToken) {
+        // Залогинен, но нет доступа к группе — ретрай бесполезен
+        showToast("У вас нет доступа к этой точке");
+        _pendingSharePlaceId = null;
+        history.replaceState(null, "", location.pathname);
+      } else {
+        // Не залогинен — возможно после логина доступ появится
+        showToast("Войдите, чтобы увидеть эту точку");
+      }
+    } else if (resp.status === 404) {
+      showToast("Точка не найдена");
+      _pendingSharePlaceId = null;
+      history.replaceState(null, "", location.pathname);
+    } else {
+      // другая ошибка — тихий сброс
+      _pendingSharePlaceId = null;
+      history.replaceState(null, "", location.pathname);
+    }
+  } catch (e) {
+    console.error("Ошибка загрузки shared place:", e);
+  }
 }
 
 let _moderating = false;
@@ -5091,7 +5153,16 @@ function maybeRefreshSearchResults() {
   // Автообновление вызывало мерцание результатов каждые 8 секунд.
 }
 
-map.on("load", refresh);
+map.on("load", async () => {
+  await refresh();
+  // Обработка share-ссылки: ?place=123
+  const urlParams = new URLSearchParams(location.search);
+  const sp = urlParams.get("place");
+  if (sp) {
+    _pendingSharePlaceId = sp;
+    await tryOpenSharedPlace();
+  }
+});
 let _refreshTimer = null;
 map.on("moveend", () => {
   clearTimeout(_refreshTimer);

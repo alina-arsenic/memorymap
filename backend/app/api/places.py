@@ -9,6 +9,7 @@ from app.services.places import PlaceService
 from app.storage import detect_mime, move_to_place_folder, validate_temp_key
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -133,6 +134,44 @@ def list_places_feed(
             raise HTTPException(status_code=400, detail="bad_scope")
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.get("/places/{place_id}")
+def get_place(
+    place_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Получить одну точку по ID (для share-ссылки)."""
+    place = db.query(Place).filter(Place.id == place_id).one_or_none()
+    if not place:
+        raise HTTPException(status_code=404, detail="not_found")
+
+    group = db.query(Group).filter(Group.id == place.group_id).one_or_none()
+    uid = current_user.id if current_user else None
+    role = current_user.role if current_user else None
+
+    # Проверка доступа к группе
+    try:
+        GroupService.require_can_view(db, current_user, group)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="no_access")
+
+    # Проверка модерации для публичных групп
+    if group and group.visibility == "public":
+        if place.moderation_status == "rejected":
+            if uid != place.user_id:
+                raise HTTPException(404, "not_found")
+        elif place.moderation_status == "pending":
+            if role not in ("admin", "moderator") and uid != place.user_id:
+                raise HTTPException(404, "not_found")
+
+    return {
+        "id": place.id,
+        "title": place.title,
+        "lat": place.lat,
+        "lon": place.lon,
+        "group_id": place.group_id,
+    }
+
 @router.post("/places/bot")
 def create_place_bot(
     p: BotPlaceCreate,
@@ -165,6 +204,12 @@ def create_place_bot(
             lon=p.lon,
             media_keys=p.media_keys,
         )
+        # Помечаем источник (raw SQL — колонка может отсутствовать)
+        try:
+            db.execute(text("UPDATE places SET source = 'bot' WHERE id = :pid"), {"pid": pid})
+            db.commit()
+        except Exception:
+            db.rollback()
         return {"id": pid}
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
