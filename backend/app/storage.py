@@ -1,3 +1,4 @@
+import io
 import logging
 import os
 import re
@@ -6,6 +7,7 @@ from urllib.parse import urlparse, urlunparse
 import boto3
 from botocore.exceptions import ClientError
 from fastapi import HTTPException
+from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -42,17 +44,30 @@ def detect_mime(key: str) -> str:
     return _EXT_TO_MIME.get(ext, "image/jpeg")
 
 
+_s3_cached = None
+_bucket_ensured = False
+
+
 def s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=S3_ENDPOINT,
-        aws_access_key_id=os.getenv("S3_ACCESS_KEY", "minioadmin"),
-        aws_secret_access_key=os.getenv("S3_SECRET_KEY", "minioadmin"),
-        region_name=os.getenv("S3_REGION", "us-east-1"),
-        use_ssl=os.getenv("S3_USE_SSL", "false").lower() == "true",
-    )
+    """Возвращает singleton S3-клиент (один на процесс)."""
+    global _s3_cached  # noqa: PLW0603
+    if _s3_cached is None:
+        _s3_cached = boto3.client(
+            "s3",
+            endpoint_url=S3_ENDPOINT,
+            aws_access_key_id=os.getenv("S3_ACCESS_KEY", "minioadmin"),
+            aws_secret_access_key=os.getenv("S3_SECRET_KEY", "minioadmin"),
+            region_name=os.getenv("S3_REGION", "us-east-1"),
+            use_ssl=os.getenv("S3_USE_SSL", "false").lower() == "true",
+        )
+    return _s3_cached
+
 
 def ensure_bucket(s3):
+    """Проверяет/создаёт bucket. Вызывается один раз за процесс."""
+    global _bucket_ensured  # noqa: PLW0603
+    if _bucket_ensured:
+        return
     try:
         s3.head_bucket(Bucket=BUCKET)
     except ClientError:
@@ -60,6 +75,7 @@ def ensure_bucket(s3):
             s3.create_bucket(Bucket=BUCKET)
         except ClientError:
             logger.warning("Не удалось создать bucket %s", BUCKET, exc_info=True)
+    _bucket_ensured = True
 
 def _apply_public_endpoint(url: str) -> str:
     """Меняем host в presigned-URL на тот, что доступен браузеру."""
@@ -82,7 +98,6 @@ def presign_put(key: str, content_type: str, expires: int = 600) -> str:
 
 def presign_get(key: str, expires: int = 300) -> str:
     s3 = s3_client()
-    ensure_bucket(s3)
     url = s3.generate_presigned_url(
         ClientMethod="get_object",
         Params={"Bucket": BUCKET, "Key": key},
@@ -152,3 +167,52 @@ def delete_object(key: str) -> None:
     s3 = s3_client()
     ensure_bucket(s3)
     s3.delete_object(Bucket=BUCKET, Key=key)
+
+
+# Размер миниатюры (макс. сторона)
+THUMB_MAX_SIZE = 200
+
+
+def generate_thumbnail(s3_key: str) -> str | None:
+    """Скачивает фото из S3, создаёт миниатюру (200px), загружает обратно.
+
+    Возвращает S3-ключ миниатюры или None при ошибке.
+    Миниатюра сохраняется в ту же папку с префиксом t_ на имя файла.
+    """
+    s3 = s3_client()
+    try:
+        resp = s3.get_object(Bucket=BUCKET, Key=s3_key)
+        data = resp["Body"].read()
+    except Exception:
+        logger.warning("Не удалось скачать %s для миниатюры", s3_key, exc_info=True)
+        return None
+
+    try:
+        img = Image.open(io.BytesIO(data))
+        # Авто-поворот по EXIF
+        img = ImageOps.exif_transpose(img)
+        img.thumbnail((THUMB_MAX_SIZE, THUMB_MAX_SIZE), Image.LANCZOS)
+        # Конвертируем в RGB для JPEG (RGBA / P не поддерживаются)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75, optimize=True)
+        buf.seek(0)
+    except Exception:
+        logger.warning("Не удалось создать миниатюру для %s", s3_key, exc_info=True)
+        return None
+
+    # Ключ миниатюры: та же папка, префикс t_ на имя файла
+    parts = s3_key.rsplit("/", 1)
+    if len(parts) == 2:
+        thumb_key = f"{parts[0]}/t_{parts[1].rsplit('.', 1)[0]}.jpg"
+    else:
+        thumb_key = f"t_{s3_key.rsplit('.', 1)[0]}.jpg"
+
+    try:
+        s3.put_object(Bucket=BUCKET, Key=thumb_key, Body=buf.getvalue(), ContentType="image/jpeg")
+    except Exception:
+        logger.warning("Не удалось загрузить миниатюру %s", thumb_key, exc_info=True)
+        return None
+
+    return thumb_key

@@ -99,10 +99,12 @@ def list_moderation_places(
     # Сборка ответа
     items = []
     for place, user in rows:
-        media_list = [
-            {"id": m.id, "key": m.s3_key, "url": presign_get(m.s3_key)}
-            for m in media_by_place.get(place.id, [])[:3]
-        ]
+        media_list = []
+        for m in media_by_place.get(place.id, [])[:3]:
+            entry = {"id": m.id, "key": m.s3_key, "url": presign_get(m.s3_key)}
+            if m.thumb_key:
+                entry["thumb_url"] = presign_get(m.thumb_key)
+            media_list.append(entry)
         items.append({
             "id": place.id,
             "group_id": place.group_id,

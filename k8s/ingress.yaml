@@ -1,0 +1,58 @@
+# Ingress для MinIO (presigned URL media)
+# Отдельный ресурс — нужен upstream-vhost для корректной
+# верификации S3-подписей (Host должен совпадать с S3_ENDPOINT)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minio-ingress
+  namespace: memory-map-ru
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/upstream-vhost: "minio:9000"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - memory-map.ru
+    secretName: memorymap-tls
+  rules:
+  - host: memory-map.ru
+    http:
+      paths:
+      - path: /memorymap-media
+        pathType: Prefix
+        backend:
+          service:
+            name: minio
+            port:
+              number: 9000
+---
+# Ingress для API (backend + frontend)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-ingress
+  namespace: memory-map-ru
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    # Gzip/Brotli включены глобально в ConfigMap ingress-nginx-controller
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - memory-map.ru
+    secretName: memorymap-tls
+  rules:
+  - host: memory-map.ru
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api
+            port:
+              number: 8000

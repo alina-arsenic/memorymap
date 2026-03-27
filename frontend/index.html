@@ -6,15 +6,18 @@
     <title>MemoryMap</title>
     <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
-    <!-- Yandex.Metrika counter -->
+    <!-- Yandex.Metrika counter — отложенная загрузка -->
     <script type="text/javascript">
-      (function(m,e,t,r,i,k,a){
-        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-        m[i].l=1*new Date();
-        for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
-        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
-      })(window,document,'script','https://mc.yandex.ru/metrika/tag.js?id=108257818','ym');
-      ym(108257818,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
+      function _initYM(){
+        (function(m,e,t,r,i,k,a){
+          m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+          m[i].l=1*new Date();
+          for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
+          k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window,document,'script','https://mc.yandex.ru/metrika/tag.js?id=108257818','ym');
+        ym(108257818,'init',{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});
+      }
+      if('requestIdleCallback' in window){requestIdleCallback(_initYM)}else{setTimeout(_initYM,2000)}
     </script>
     <noscript><div><img src="https://mc.yandex.ru/watch/108257818" style="position:absolute;left:-9999px;" alt=""/></div></noscript>
     <!-- /Yandex.Metrika counter -->
@@ -65,8 +68,11 @@
           <input id="login-input" class="input" />
 
           <div class="field-label" style="margin-top: 6px">Пароль</div>
-          <input id="login-password-input" type="password" class="input"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();uiLogin();}" />
+          <div class="password-wrapper">
+            <input id="login-password-input" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiLogin();}" />
+            <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
 
           <div style="margin-top: 6px; display: flex; align-items: center; justify-content: space-between">
             <a href="#" class="auth-link" onclick="showForgotPasswordForm(); return false;">Забыли пароль?</a>
@@ -85,8 +91,18 @@
           <input id="reg-email-input" class="input" type="email" />
 
           <div class="field-label" style="margin-top: 6px">Пароль</div>
-          <input id="reg-password-input" type="password" class="input"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();uiRegister();}" />
+          <div class="password-wrapper">
+            <input id="reg-password-input" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiRegister();}" />
+            <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+
+          <div class="field-label" style="margin-top: 6px">Повторите пароль</div>
+          <div class="password-wrapper">
+            <input id="reg-password-confirm" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiRegister();}" />
+            <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
 
           <div style="margin-top: 6px; text-align: right">
             <button class="btn btn-primary" onclick="uiRegister()">Зарегистрироваться</button>
@@ -135,8 +151,18 @@
           <input id="forgot-reset-code-input" class="input" maxlength="6" placeholder="6 цифр"
             onkeydown="if(event.key==='Enter'){event.preventDefault();uiResetPassword();}" />
           <div class="field-label" style="margin-top: 6px">Новый пароль</div>
-          <input id="forgot-reset-password-input" type="password" class="input"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();uiResetPassword();}" />
+          <div class="password-wrapper">
+            <input id="forgot-reset-password-input" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiResetPassword();}" />
+            <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+
+          <div class="field-label" style="margin-top: 6px">Повторите пароль</div>
+          <div class="password-wrapper">
+            <input id="forgot-reset-password-confirm" type="password" class="input"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();uiResetPassword();}" />
+            <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
           <div style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap">
             <button class="btn btn-primary" onclick="uiResetPassword()">Сбросить пароль</button>
             <button class="btn" onclick="showLoginForm()">Назад</button>
@@ -224,12 +250,26 @@
                 <h3 class="settings-panel-title">Смена пароля</h3>
                 <div class="settings-field">
                   <div class="field-label">Текущий пароль</div>
-                  <input id="settings-old-password" type="password" class="input" />
+                  <div class="password-wrapper">
+                    <input id="settings-old-password" type="password" class="input" />
+                    <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                  </div>
                 </div>
                 <div class="settings-field">
                   <div class="field-label">Новый пароль</div>
-                  <input id="settings-new-password" type="password" class="input"
-                    onkeydown="if(event.key==='Enter'){event.preventDefault();uiChangePassword();}" />
+                  <div class="password-wrapper">
+                    <input id="settings-new-password" type="password" class="input"
+                      onkeydown="if(event.key==='Enter'){event.preventDefault();uiChangePassword();}" />
+                    <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                  </div>
+                </div>
+                <div class="settings-field">
+                  <div class="field-label">Повторите новый пароль</div>
+                  <div class="password-wrapper">
+                    <input id="settings-new-password-confirm" type="password" class="input"
+                      onkeydown="if(event.key==='Enter'){event.preventDefault();uiChangePassword();}" />
+                    <button type="button" class="password-toggle" tabindex="-1" aria-label="Показать пароль" onclick="togglePasswordVisibility(this)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                  </div>
                 </div>
                 <button class="btn btn-primary" onclick="uiChangePassword()">Сменить пароль</button>
                 <div id="settings-password-status" class="hint"></div>
@@ -452,7 +492,6 @@
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
     <script src="/app.js" defer></script>
     <div id="mm-edit-modal" class="mm-modal" style="display: none">
       <div class="mm-modal-card">

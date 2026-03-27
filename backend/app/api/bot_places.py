@@ -8,6 +8,7 @@ from app.services.places import PlaceService
 from app.storage import (
     delete_object,
     detect_mime,
+    generate_thumbnail,
     move_to_place_folder,
     presign_get,
     validate_temp_key,
@@ -234,6 +235,8 @@ def bot_delete_media(
 
     try:
         delete_object(m.s3_key)
+        if m.thumb_key:
+            delete_object(m.thumb_key)
     except Exception:
         logger.warning("S3: не удалось удалить %s", m.s3_key, exc_info=True)
 
@@ -268,11 +271,13 @@ def bot_link_media(
 
     # перемещаем из uploads/ в places/{place_id}/
     new_key = move_to_place_folder(payload.temp_key, place_id)
+    thumb_key = generate_thumbnail(new_key)
 
     m = Media(
         place_id=place_id,
         user_id=place.user_id,
         s3_key=new_key,
+        thumb_key=thumb_key,
         mime=detect_mime(payload.temp_key),
         status="ready",
     )

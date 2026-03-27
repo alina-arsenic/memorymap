@@ -102,8 +102,10 @@ def delete_media(
     if place.user_id != current_user.id:
         raise HTTPException(403, "Forbidden")
 
-    # сначала s3
+    # сначала s3: оригинал + миниатюра
     delete_object(m.s3_key)
+    if m.thumb_key:
+        delete_object(m.thumb_key)
 
     # потом db
     db.delete(m)

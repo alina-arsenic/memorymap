@@ -51,6 +51,7 @@ class Media(Base):
     place_id = Column(Integer, ForeignKey("places.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     s3_key = Column(Text, nullable=False)
+    thumb_key = Column(Text, nullable=True)  # S3-ключ миниатюры (200px)
     mime = Column(Text)
     status = Column(Text, nullable=False, default="ready")  # pending|processing|ready|failed
     created_at = Column(DateTime(timezone=True))

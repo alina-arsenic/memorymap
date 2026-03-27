@@ -19,17 +19,29 @@ from app.api import (
 from app.api import bot as bot_api
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import FileResponse
 
 app = FastAPI(title="MemoryMap API")
 
+# Gzip-сжатие (fallback для dev и резерв для прода)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# Security headers
+
+# Security headers + Cache-Control для статики
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
+
+    # Cache-Control для статических файлов
+    path = request.url.path
+    if path.endswith((".js", ".css")):
+        response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
+    elif path.endswith(".html") or path == "/":
+        response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
+
     return response
 
 app.include_router(auth.router, prefix="/v1")
@@ -54,6 +66,13 @@ app.include_router(moderation.router, prefix="/v1")
 app.include_router(users.router, prefix="/v1")
 app.include_router(friends.router, prefix="/v1")
 app.include_router(blocks.router, prefix="/v1")
+
+# Аналитика (файл может отсутствовать — не в git)
+try:
+    from app.api.analytics import setup_analytics
+    setup_analytics(app)
+except ImportError:
+    pass
 
 # SPA fallback — прямой переход на /settings (закладка, F5) отдаёт index.html
 @app.get("/settings")

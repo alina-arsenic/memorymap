@@ -11,6 +11,7 @@ from app.services.users import UserService
 from app.storage import (
     delete_place_folder,
     detect_mime,
+    generate_thumbnail,
     move_to_place_folder,
     presign_get,
     validate_temp_key,
@@ -72,10 +73,12 @@ class PlaceService:
         for key in (media_keys or []):
             validate_temp_key(key, uid)
             new_key = move_to_place_folder(key, place.id)
+            thumb_key = generate_thumbnail(new_key)
             db.add(Media(
                 place_id=place.id,
                 user_id=uid,
                 s3_key=new_key,
+                thumb_key=thumb_key,
                 mime=detect_mime(key),
                 status="ready",
             ))
@@ -154,11 +157,14 @@ class PlaceService:
         if place_ids:
             media_rows = db.query(Media).filter(Media.place_id.in_(place_ids)).all()
             for m in media_rows:
-                media_map.setdefault(m.place_id, []).append({
+                entry = {
                     "id": m.id,
                     "key": m.s3_key,
                     "url": presign_get(m.s3_key),
-                })
+                }
+                if m.thumb_key:
+                    entry["thumb_url"] = presign_get(m.thumb_key)
+                media_map.setdefault(m.place_id, []).append(entry)
 
         # Batch-запрос: какие точки имеют pending-жалобы
         report_place_ids = ReportService.get_reported_place_ids(db, place_ids)
@@ -284,9 +290,10 @@ class PlaceService:
         if place_ids:
             media_rows = db.query(Media).filter(Media.place_id.in_(place_ids)).all()
             for m in media_rows:
-                media_map.setdefault(m.place_id, []).append(
-                    {"id": m.id, "key": m.s3_key, "url": presign_get(m.s3_key)}
-                )
+                entry = {"id": m.id, "key": m.s3_key, "url": presign_get(m.s3_key)}
+                if m.thumb_key:
+                    entry["thumb_url"] = presign_get(m.thumb_key)
+                media_map.setdefault(m.place_id, []).append(entry)
 
         # Batch-запрос: какие точки имеют pending-жалобы
         report_place_ids = ReportService.get_reported_place_ids(db, place_ids)

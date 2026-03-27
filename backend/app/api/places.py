@@ -6,7 +6,7 @@ from app.core.deps import get_db
 from app.models.models import Group, Media, Place, User
 from app.services.groups import GroupService
 from app.services.places import PlaceService
-from app.storage import detect_mime, move_to_place_folder, validate_temp_key
+from app.storage import detect_mime, generate_thumbnail, move_to_place_folder, validate_temp_key
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -308,11 +308,13 @@ def add_media(
         raise HTTPException(status_code=400, detail="media_limit")
 
     new_key = move_to_place_folder(req.temp_key, place_id)
+    thumb_key = generate_thumbnail(new_key)
 
     m = Media(
         place_id=place_id,
         user_id=current_user.id,
         s3_key=new_key,
+        thumb_key=thumb_key,
         mime=detect_mime(req.temp_key),
         status="ready",
     )

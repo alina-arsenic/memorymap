@@ -76,6 +76,34 @@ wrapper.innerHTML = svg.trim();
 return wrapper.firstChild; // сам <svg>
 }
 
+/** Глазик: переключить видимость пароля */
+const _eyeOpenSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const _eyeOffSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+function togglePasswordVisibility(btn) {
+  const wrapper = btn.closest(".password-wrapper");
+  if (!wrapper) return;
+  const input = wrapper.querySelector("input");
+  if (!input) return;
+  const isHidden = input.type === "password";
+  input.type = isHidden ? "text" : "password";
+  btn.innerHTML = isHidden ? _eyeOffSvg : _eyeOpenSvg;
+  btn.setAttribute("aria-label", isHidden ? "Скрыть пароль" : "Показать пароль");
+}
+
+/** Сбросить все password-поля обратно в type=password + иконку глазика */
+function _resetPasswordVisibility() {
+  document.querySelectorAll(".password-wrapper").forEach(function(w) {
+    const input = w.querySelector("input");
+    const btn = w.querySelector(".password-toggle");
+    if (input) input.type = "password";
+    if (btn) {
+      btn.innerHTML = _eyeOpenSvg;
+      btn.setAttribute("aria-label", "Показать пароль");
+    }
+  });
+}
+
 /** Скрыть все гостевые формы */
 function _hideAllGuestForms() {
   const ids = ["login-form", "register-form", "verify-form", "forgot-email-form", "forgot-reset-form"];
@@ -83,6 +111,8 @@ function _hideAllGuestForms() {
     const el = document.getElementById(id);
     if (el) el.style.display = "none";
   }
+  // сбрасываем видимость паролей при смене формы
+  _resetPasswordVisibility();
 }
 
 /** Переключиться на форму входа */
@@ -545,7 +575,7 @@ async function uiLogin() {
   if (btn.disabled) return;
   btn.disabled = true;
   try {
-    const login = (document.getElementById("login-input").value || "").trim();
+    const login = (document.getElementById("login-input").value || "").trim().toLowerCase();
     const password = document.getElementById("login-password-input").value || "";
     if (!login || !password) { showToast("Введите логин и пароль.", "error"); return; }
 
@@ -615,14 +645,17 @@ async function uiRegister() {
   if (btn.disabled) return;
   btn.disabled = true;
   try {
-    const login = (document.getElementById("reg-login-input").value || "").trim();
+    const login = (document.getElementById("reg-login-input").value || "").trim().toLowerCase();
     const email = (document.getElementById("reg-email-input").value || "").trim();
     const password = document.getElementById("reg-password-input").value || "";
+    const confirmPassword = document.getElementById("reg-password-confirm").value || "";
     if (!login || !password || !email) { showToast("Заполните логин, email и пароль.", "error"); return; }
     if (login.length < 3 || login.length > 64) { showToast("Логин должен быть от 3 до 64 символов.", "error"); return; }
     if (!/^[a-zA-Z0-9_-]+$/.test(login)) { showToast("Логин может содержать только латиницу, цифры, _ и -", "error"); return; }
     if (password.length < 8) { showToast("Пароль должен быть не короче 8 символов.", "error"); return; }
     if (password.length > 128) { showToast("Пароль не должен превышать 128 символов.", "error"); return; }
+    if (!confirmPassword) { showToast("Повторите пароль.", "error"); return; }
+    if (password !== confirmPassword) { showToast("Пароли не совпадают.", "error"); return; }
 
     const resp = await fetch(`${API_BASE}/v1/auth/register`, {
       method: "POST",
@@ -690,6 +723,7 @@ async function uiVerifyEmail() {
     document.getElementById("verify-form").style.display = "none";
     document.getElementById("login-form").style.display = "";
     document.getElementById("verify-code-input").value = "";
+    _resetPasswordVisibility();
     _updateAuthModalCloseBtn(); // W3: показать крестик после verify
     showToast("Email подтверждён! Теперь войдите в аккаунт.", "success");
   } catch (e) {
@@ -771,10 +805,13 @@ async function uiResetPassword() {
   try {
     const code = (document.getElementById("forgot-reset-code-input").value || "").trim();
     const newPassword = document.getElementById("forgot-reset-password-input").value || "";
+    const confirmPassword = document.getElementById("forgot-reset-password-confirm").value || "";
     if (!code) { statusEl.innerText = "Введите код из письма."; return; }
     if (!newPassword) { statusEl.innerText = "Введите новый пароль."; return; }
     if (newPassword.length < 8) { statusEl.innerText = "Пароль должен быть не короче 8 символов."; return; }
     if (newPassword.length > 128) { statusEl.innerText = "Пароль не должен превышать 128 символов."; return; }
+    if (!confirmPassword) { statusEl.innerText = "Повторите пароль."; return; }
+    if (newPassword !== confirmPassword) { statusEl.innerText = "Пароли не совпадают."; return; }
 
     const resp = await fetch(`${API_BASE}/v1/auth/reset-password`, {
       method: "POST",
@@ -796,6 +833,7 @@ async function uiResetPassword() {
     try { sessionStorage.removeItem("mm_pendingResetEmail"); } catch(_e) {}
     document.getElementById("forgot-reset-code-input").value = "";
     document.getElementById("forgot-reset-password-input").value = "";
+    document.getElementById("forgot-reset-password-confirm").value = "";
     showLoginForm();
     showToast("Пароль успешно сброшен! Войдите с новым паролем.", "success");
   } catch (e) {
@@ -825,7 +863,7 @@ function openSettingsOverlay(silent) {
   toggleSettingsSection("telegram");
   // сбрасываем поля
   const fields = ["settings-new-login", "settings-new-email", "settings-email-code",
-    "settings-old-password", "settings-new-password"];
+    "settings-old-password", "settings-new-password", "settings-new-password-confirm"];
   for (const id of fields) {
     const el = document.getElementById(id);
     if (el) el.value = "";
@@ -841,6 +879,8 @@ function openSettingsOverlay(silent) {
   if (step1) step1.style.display = "";
   if (step2) step2.style.display = "none";
   _pendingNewEmail = null;
+  // сбрасываем видимость паролей
+  _resetPasswordVisibility();
 
   // C6: pushState только если pathname !== "/settings"
   if (!silent) {
@@ -939,10 +979,13 @@ async function uiChangePassword() {
   try {
     const oldPw = document.getElementById("settings-old-password").value || "";
     const newPw = document.getElementById("settings-new-password").value || "";
+    const confirmPw = document.getElementById("settings-new-password-confirm").value || "";
     if (!oldPw) { statusEl.innerText = "Введите текущий пароль."; return; }
     if (!newPw) { statusEl.innerText = "Введите новый пароль."; return; }
     if (newPw.length < 8) { statusEl.innerText = "Пароль должен быть не короче 8 символов."; return; }
     if (newPw.length > 128) { statusEl.innerText = "Пароль не должен превышать 128 символов."; return; }
+    if (!confirmPw) { statusEl.innerText = "Повторите новый пароль."; return; }
+    if (newPw !== confirmPw) { statusEl.innerText = "Пароли не совпадают."; return; }
 
     const resp = await apiFetch("/v1/me/change-password", {
       method: "POST",
@@ -1109,9 +1152,14 @@ function uiLogout() {
   const regLogin = document.getElementById("reg-login-input");
   const regEmail = document.getElementById("reg-email-input");
   const regPass = document.getElementById("reg-password-input");
+  const regConfirm = document.getElementById("reg-password-confirm");
   if (regLogin) regLogin.value = "";
   if (regEmail) regEmail.value = "";
   if (regPass) regPass.value = "";
+  if (regConfirm) regConfirm.value = "";
+
+  // сбрасываем видимость паролей
+  _resetPasswordVisibility();
 
   // очистить превью фото
   _selectedFiles = [];
@@ -2778,12 +2826,33 @@ const body = {
 }
 
 // Конвертация HEIC/HEIF в JPEG на клиенте (для iPhone фото).
+// heic2any (1.35MB) загружается динамически только при необходимости.
 // Возвращает null если HEIC и heic2any недоступен — вызывающий код должен пропустить файл.
+var _heic2anyLoading = null;
+function _loadHeic2any() {
+  if (typeof heic2any !== "undefined") return Promise.resolve();
+  if (_heic2anyLoading) return _heic2anyLoading;
+  _heic2anyLoading = new Promise(function(resolve, reject) {
+    var s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+    s.onload = resolve;
+    s.onerror = function() { _heic2anyLoading = null; reject(new Error("heic2any load failed")); };
+    document.head.appendChild(s);
+  });
+  return _heic2anyLoading;
+}
+
 async function convertHeicIfNeeded(file) {
   var isHeic = file.type === "image/heic" || file.type === "image/heif"
     || file.name.toLowerCase().endsWith(".heic")
     || file.name.toLowerCase().endsWith(".heif");
   if (!isHeic) return file;
+  try {
+    await _loadHeic2any();
+  } catch (e) {
+    console.warn("heic2any не загружен, HEIC-файл пропущен:", file.name, e);
+    return null;
+  }
   if (typeof heic2any === "undefined") {
     console.warn("heic2any не загружен, HEIC-файл пропущен:", file.name);
     return null;
@@ -3421,7 +3490,7 @@ async function refresh() {
         const visible = p.media.slice(0, maxVisible);
         const hiddenCount = p.media.length - maxVisible;
         const thumbs = visible.map(m =>
-          `<img src="${m.url}" data-full="${m.url}" class="mm-photo-thumb" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" />`
+          `<img src="${escapeHtml(m.thumb_url || m.url)}" data-full="${escapeHtml(m.url)}" class="mm-photo-thumb" loading="lazy" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" />`
         ).join("");
         const moreBtn = hiddenCount > 0
           ? `<div class="mm-photo-more" onclick="openGalleryForPlace(${p.id},${maxVisible});event.stopPropagation();">+${hiddenCount}</div>`
@@ -3653,9 +3722,9 @@ function renderEditPhotos(place) {
 
   container.innerHTML = media.map(m => `
     <div style="position:relative;width:60px;height:60px;">
-      <img src="${m.url}" class="mm-photo-thumb"
+      <img src="${escapeHtml(m.thumb_url || m.url)}" class="mm-photo-thumb" loading="lazy"
         style="width:60px;height:60px;object-fit:cover;border-radius:6px;cursor:pointer;"
-        data-full="${m.url}" />
+        data-full="${escapeHtml(m.url)}" />
       <button class="mm-del-media-btn" data-media-id="${m.id}" title="Удалить"
         style="position:absolute;top:2px;right:2px;border:none;background:rgba(0,0,0,0.55);
         color:#fff;border-radius:9999px;width:18px;height:18px;cursor:pointer;">×</button>
@@ -4194,8 +4263,8 @@ async function loadModerationQueue() {
 
       // Превью фотографий
       const photos = (p.media || []).map(m =>
-        `<img src="${escapeHtml(m.url)}" data-full="${escapeHtml(m.url)}" alt="фото"
-          class="mm-photo-thumb"
+        `<img src="${escapeHtml(m.thumb_url || m.url)}" data-full="${escapeHtml(m.url)}" alt="фото"
+          class="mm-photo-thumb" loading="lazy"
           style="width:60px;height:60px;object-fit:cover;border-radius:4px;cursor:pointer;" />`
       ).join("");
       const photosHtml = photos
@@ -5519,7 +5588,7 @@ async function openLayerCardsPanel(groupId) {
       const note = p.note ? escapeHtml(p.note) : "";
       const author = escapeHtml(p.user_login || "");
       const media = Array.isArray(p.media) ? p.media : [];
-      const thumb = media.length > 0 ? media[0].url : null;
+      const thumb = media.length > 0 ? (media[0].thumb_url || media[0].url) : null;
       const thumbHtml = thumb
         ? `<img class="layer-place-card-thumb" src="${escapeHtml(thumb)}" loading="lazy" />`
         : "";
