@@ -18,6 +18,13 @@ let _pendingSharePlaceId = null; // ID точки из share-ссылки (?plac
 let tempMarker = null; // временный желтый маркер
 let tempCoords = null; // { lng, lat } последнего ПКМ
 
+// Подсказка как поставить точку — зависит от устройства
+function _placeHint() {
+  return ("ontouchstart" in window)
+    ? "Точка не выбрана"
+    : "ПКМ по карте, чтобы выбрать точку.";
+}
+
 // Friends UI state
 let outgoingPendingIds = new Set();
 
@@ -184,6 +191,13 @@ let _currentTab = "layers";
 
 function switchTab(tabName) {
   _currentTab = tabName;
+  // M6: авторазворачивание sidebar при программном переключении
+  var sb = document.querySelector(".sidebar");
+  if (sb && sb.classList.contains("collapsed")) {
+    sb.classList.remove("collapsed");
+    try { localStorage.setItem("mm_sidebar_collapsed", ""); } catch(e){}
+    if (typeof map !== "undefined" && map) setTimeout(function(){ map.resize(); }, 100);
+  }
   // Закрыть панель карточек слоя при уходе с таба «Слои»
   if (tabName !== "layers") closeLayerCardsPanel();
   // Закрыть edit place при уходе с таба «Место»
@@ -211,6 +225,20 @@ function switchTab(tabName) {
   if (tabName === "moderation") loadModerationQueue();
 }
 
+// M6: сворачивание/разворачивание sidebar на мобильных
+function toggleSidebar() {
+  var sidebar = document.querySelector(".sidebar");
+  if (!sidebar) return;
+  sidebar.classList.toggle("collapsed");
+  try {
+    localStorage.setItem("mm_sidebar_collapsed", sidebar.classList.contains("collapsed") ? "1" : "");
+  } catch (e) { /* private browsing */ }
+  // Карта пересчитывает размер canvas
+  if (typeof map !== "undefined" && map) {
+    setTimeout(function() { map.resize(); }, 100);
+  }
+}
+
 function applyAuthUI(isAuthed) {
   const authedOnly = document.getElementById("authed-only");
   const appEl = document.querySelector(".app");
@@ -226,6 +254,14 @@ function applyAuthUI(isAuthed) {
     document.documentElement.classList.remove("guest-mode");
     // Показать authed-only (sidebar контент)
     if (authedOnly) authedOnly.style.display = "";
+    // M6: восстановление collapsed-состояния sidebar
+    try {
+      var isMobile = window.matchMedia("(max-width:800px),(orientation:landscape) and (max-height:500px) and (pointer:coarse)").matches;
+      if (isMobile && localStorage.getItem("mm_sidebar_collapsed") === "1") {
+        var sidebarEl = document.querySelector(".sidebar");
+        if (sidebarEl) sidebarEl.classList.add("collapsed");
+      }
+    } catch (e) {}
     // C19: закрыть auth-модалку после успешного логина
     closeAuthModal();
   } else {
@@ -1089,7 +1125,7 @@ function uiLogout() {
   tempCoords = null;
 
   const coordsEl = document.getElementById("web-coords");
-  if (coordsEl) coordsEl.textContent = "ПКМ по карте, чтобы выбрать точку.";
+  if (coordsEl) coordsEl.textContent = _placeHint();
 
   const statusEl = document.getElementById("web-add-status");
   if (statusEl) statusEl.innerText = "Сначала войдите, чтобы добавлять точки.";
@@ -1907,10 +1943,25 @@ function toggleFriendMenu(btn, event) {
   dd.classList.toggle("open");
 }
 
-// Закрытие comment-dropdown при ресайзе окна
+// Закрытие comment-dropdown при ресайзе окна + M4: восстановление карты при повороте
 window.addEventListener("resize", () => {
   document.querySelectorAll(".comment-actions .mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
   layersFloatingControl?.close();
+  // M4: при смене ориентации — сохраняем center+zoom (они стабильны в отличие от bounds)
+  // и восстанавливаем после завершения анимации поворота iOS
+  var curOr = window.innerWidth > window.innerHeight ? "l" : "p";
+  if (curOr !== _lastOrientation) {
+    _lastOrientation = curOr;
+    if (typeof map !== "undefined" && map && map.loaded()) {
+      var c = map.getCenter();
+      var z = map.getZoom();
+      setTimeout(function() {
+        map.resize();
+        map.setCenter(c);
+        map.setZoom(z);
+      }, 400);
+    }
+  }
 });
 
 // Закрытие по Escape — полная цепочка приоритетов (W1)
@@ -2613,7 +2664,9 @@ const statusEl = document.getElementById("web-add-status");
 
 if (!tempCoords) {
     if (statusEl) {
-    statusEl.innerText = "Сначала выберите точку: нажмите правой кнопкой мыши по карте.";
+    statusEl.innerText = ("ontouchstart" in window)
+      ? "Сначала выберите точку: удерживайте палец на карте."
+      : "Сначала выберите точку: нажмите правой кнопкой мыши по карте.";
     statusEl.style.color = "#52525b";
     statusEl.style.fontWeight = "400";
     }
@@ -2702,7 +2755,7 @@ const body = {
     _renderPhotoPreview();
     const coordsEl = document.getElementById("web-coords");
     if (coordsEl) {
-    coordsEl.textContent = "ПКМ по карте, чтобы выбрать точку.";
+    coordsEl.textContent = _placeHint();
     }
 
     if (tempMarker) {
@@ -2860,10 +2913,29 @@ class LayersFloatingControl {
 
   open() {
     renderFloatingLayersContent(true);
+    // M5: перемещаем dropdown в body — гарантирует что overflow:hidden и
+    // transform/will-change контейнера карты не обрежут и не сместят dropdown
+    var btnRect = this._btn.getBoundingClientRect();
+    document.body.appendChild(this._dropdown);
+    this._dropdown.style.position = "fixed";
+    this._dropdown.style.bottom = "auto";
+    this._dropdown.style.right = (document.documentElement.clientWidth - btnRect.right) + "px";
+    var availH = Math.max(120, btnRect.top - 12);
+    this._dropdown.style.maxHeight = Math.min(320, availH) + "px";
     this._dropdown.classList.add("open");
+    // Dropdown отрисован — позиционируем верхний край через offsetHeight
+    var ddH = this._dropdown.offsetHeight;
+    this._dropdown.style.top = (btnRect.top - 6 - ddH) + "px";
   }
 
-  close() { this._dropdown.classList.remove("open"); }
+  close() {
+    this._dropdown.classList.remove("open");
+    this._dropdown.style.cssText = "";
+    // M5: возвращаем dropdown в контейнер кнопки
+    if (this._dropdown.parentNode !== this._container) {
+      this._container.appendChild(this._dropdown);
+    }
+  }
 
   show() { this._container.style.display = ""; }
 
@@ -2966,6 +3038,67 @@ map.on("contextmenu", (e) => {
   // Автопереключение на таб «Место»
   switchTab("place");
 });
+
+// M7: Long press на мобильных — добавление временной точки
+// (contextmenu не срабатывает по long press в MapLibre GL JS)
+var _lpTimer = null;
+var _lpStart = null;
+
+(function() {
+  var canvasContainer = map.getCanvasContainer();
+
+  canvasContainer.addEventListener("touchstart", function(e) {
+    // Только один палец (два = pinch zoom → отмена)
+    if (e.touches.length !== 1) {
+      clearTimeout(_lpTimer);
+      _lpTimer = null;
+      return;
+    }
+    if (!currentUser) return;
+
+    _lpStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    _lpTimer = setTimeout(function() {
+      _lpTimer = null;
+      if (!_lpStart) return;
+      // Screen coords → map lngLat
+      var rect = canvasContainer.getBoundingClientRect();
+      var point = new maplibregl.Point(
+        _lpStart.x - rect.left,
+        _lpStart.y - rect.top
+      );
+      var lngLat = map.unproject(point);
+      _lpStart = null;
+
+      if (_editingPlaceId) closeEditPlace();
+      setTempMarker(lngLat);
+      switchTab("place");
+    }, 500);
+  }, { passive: true });
+
+  canvasContainer.addEventListener("touchmove", function(e) {
+    if (!_lpTimer || !_lpStart) return;
+    var dx = e.touches[0].clientX - _lpStart.x;
+    var dy = e.touches[0].clientY - _lpStart.y;
+    // Смещение > 10px → отмена (палец двигается = pan, не long press)
+    if (dx * dx + dy * dy > 100) {
+      clearTimeout(_lpTimer);
+      _lpTimer = null;
+      _lpStart = null;
+    }
+  }, { passive: true });
+
+  canvasContainer.addEventListener("touchend", function() {
+    clearTimeout(_lpTimer);
+    _lpTimer = null;
+    _lpStart = null;
+  });
+
+  canvasContainer.addEventListener("touchcancel", function() {
+    clearTimeout(_lpTimer);
+    _lpTimer = null;
+    _lpStart = null;
+  });
+})();
 
 function clearMarkers() {
 currentMarkers.forEach(m => {
@@ -5242,6 +5375,15 @@ function maybeRefreshSearchResults() {
 }
 
 map.on("load", async () => {
+  // Подсказки для мобильных (touch-устройств)
+  if ("ontouchstart" in window) {
+    var h = document.getElementById("place-add-hint");
+    if (h) h.innerHTML = "<b>Удерживайте палец</b> на карте — появится временный жёлтый пин.";
+    var c = document.getElementById("web-coords");
+    if (c) c.textContent = _placeHint();
+    var s = document.getElementById("web-add-status");
+    if (s) s.textContent = "";
+  }
   await refresh();
   // Обработка share-ссылки: ?place=123
   const urlParams = new URLSearchParams(location.search);
@@ -5252,6 +5394,8 @@ map.on("load", async () => {
   }
 });
 let _refreshTimer = null;
+// M4: отслеживаем ориентацию для восстановления карты при повороте
+var _lastOrientation = window.innerWidth > window.innerHeight ? "l" : "p";
 map.on("moveend", () => {
   clearTimeout(_refreshTimer);
   _refreshTimer = setTimeout(refresh, 300);

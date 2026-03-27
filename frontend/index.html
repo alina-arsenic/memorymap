@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>MemoryMap</title>
     <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
@@ -331,7 +331,7 @@
             <!-- Секция добавления (существующая) -->
             <div id="place-add-section">
               <div class="sidebar-section-title">Добавление точек</div>
-              <div class="hint" style="margin-bottom: 8px">
+              <div id="place-add-hint" class="hint" style="margin-bottom: 8px">
                 Нажмите <b>правой кнопкой мыши</b> по карте - появится временный желтый пин.
               </div>
 
@@ -429,6 +429,10 @@
             </div>
           </div>
         </div>
+      <!-- M6: ручка-пилюля для сворачивания sidebar -->
+      <button class="sidebar-handle" onclick="toggleSidebar()" aria-label="Свернуть панель">
+        <svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 15 12 9 18 15"/></svg>
+      </button>
       </aside>
 
       <!-- Панель карточек слоя (появляется при клике по названию слоя) -->
