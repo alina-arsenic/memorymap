@@ -313,6 +313,58 @@ function mmModalSave() {
   _mmModalResolve = null;
 }
 
+/** Кастомная модалка подтверждения (замена confirm())
+ * @param {string} message — текст вопроса
+ * @param {Object} [opts]
+ * @param {string} [opts.title] — заголовок (по умолчанию "Подтверждение")
+ * @param {string} [opts.confirmText] — текст кнопки ОК (по умолчанию "Подтвердить")
+ * @param {boolean} [opts.isDanger] — красная кнопка подтверждения
+ * @returns {Promise<boolean>}
+ */
+let _mmConfirmResolve = null;
+function mmConfirm(message, opts) {
+  // Если уже открыта другая модалка подтверждения — закрываем её с false
+  if (_mmConfirmResolve) {
+    _mmConfirmResolve(false);
+    _mmConfirmResolve = null;
+  }
+  const o = opts || {};
+  const modal = document.getElementById("mm-confirm-modal");
+  const titleEl = document.getElementById("mm-confirm-title");
+  const textEl = document.getElementById("mm-confirm-text");
+  const okBtn = document.getElementById("mm-confirm-ok");
+  const cancelBtn = document.getElementById("mm-confirm-cancel");
+
+  titleEl.textContent = o.title || "Подтверждение";
+  textEl.textContent = message;
+  okBtn.textContent = o.confirmText || "Подтвердить";
+
+  // Стиль кнопки: danger или primary
+  okBtn.className = o.isDanger ? "btn btn-danger" : "btn btn-primary";
+
+  modal.style.display = "";
+
+  // Убираем старые обработчики через клонирование
+  const newOk = okBtn.cloneNode(true);
+  okBtn.parentNode.replaceChild(newOk, okBtn);
+  const newCancel = cancelBtn.cloneNode(true);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+  return new Promise((resolve) => {
+    _mmConfirmResolve = resolve;
+    newOk.addEventListener("click", () => {
+      modal.style.display = "none";
+      _mmConfirmResolve = null;
+      resolve(true);
+    });
+    newCancel.addEventListener("click", () => {
+      modal.style.display = "none";
+      _mmConfirmResolve = null;
+      resolve(false);
+    });
+  });
+}
+
 async function initAuthFromStorage() {
   const saved = localStorage.getItem(LS_TOKEN);
   // C7: если нет токена — сразу guest mode (без мерцания, класс уже на html)
@@ -450,7 +502,7 @@ async function uiLogin() {
   try {
     const login = (document.getElementById("login-input").value || "").trim();
     const password = document.getElementById("login-password-input").value || "";
-    if (!login || !password) { alert("Введите логин и пароль."); return; }
+    if (!login || !password) { showToast("Введите логин и пароль.", "error"); return; }
 
     const resp = await fetch(`${API_BASE}/v1/auth/login`, {
       method: "POST",
@@ -473,12 +525,12 @@ async function uiLogin() {
               ? "Не удалось отправить код. Нажмите «Отправить повторно»."
               : "Код подтверждения отправлен на вашу почту.";
         } else {
-          alert("Email не подтверждён. Попробуйте войти ещё раз.");
+          showToast("Email не подтверждён. Попробуйте войти ещё раз.", "error");
         }
       } else if (resp.status === 400 && errData.detail === "password_too_long") {
-        alert("Пароль слишком длинный (макс. 128 символов).");
+        showToast("Пароль слишком длинный (макс. 128 символов).", "error");
       } else {
-        alert("Неверный логин или пароль.");
+        showToast("Неверный логин или пароль.", "error");
       }
       return;
     }
@@ -490,7 +542,7 @@ async function uiLogin() {
     // Retry share-ссылки после логина (если была ?place= до авторизации)
     await tryOpenSharedPlace();
   } catch (e) {
-    alert("Ошибка сети. Попробуйте ещё раз.");
+    showToast("Ошибка сети. Попробуйте ещё раз.", "error");
   } finally {
     btn.disabled = false;
   }
@@ -514,11 +566,11 @@ async function uiRegister() {
     const login = (document.getElementById("reg-login-input").value || "").trim();
     const email = (document.getElementById("reg-email-input").value || "").trim();
     const password = document.getElementById("reg-password-input").value || "";
-    if (!login || !password || !email) { alert("Заполните логин, email и пароль."); return; }
-    if (login.length < 3 || login.length > 64) { alert("Логин должен быть от 3 до 64 символов."); return; }
-    if (!/^[a-zA-Z0-9_-]+$/.test(login)) { alert("Логин может содержать только латиницу, цифры, _ и -"); return; }
-    if (password.length < 8) { alert("Пароль должен быть не короче 8 символов."); return; }
-    if (password.length > 128) { alert("Пароль не должен превышать 128 символов."); return; }
+    if (!login || !password || !email) { showToast("Заполните логин, email и пароль.", "error"); return; }
+    if (login.length < 3 || login.length > 64) { showToast("Логин должен быть от 3 до 64 символов.", "error"); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(login)) { showToast("Логин может содержать только латиницу, цифры, _ и -", "error"); return; }
+    if (password.length < 8) { showToast("Пароль должен быть не короче 8 символов.", "error"); return; }
+    if (password.length > 128) { showToast("Пароль не должен превышать 128 символов.", "error"); return; }
 
     const resp = await fetch(`${API_BASE}/v1/auth/register`, {
       method: "POST",
@@ -527,18 +579,18 @@ async function uiRegister() {
     });
     if (resp.status === 409) {
       const data = await resp.json().catch(() => ({}));
-      if (data.detail === "email_taken") alert("Этот email уже зарегистрирован.");
-      else alert("Логин занят.");
+      if (data.detail === "email_taken") showToast("Этот email уже зарегистрирован.", "error");
+      else showToast("Логин занят.", "error");
       return;
     }
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      if (data.detail === "invalid_email") alert("Некорректный формат email.");
-      else if (data.detail === "login_invalid_length") alert("Логин должен быть от 3 до 64 символов.");
-      else if (data.detail === "login_invalid_chars") alert("Логин может содержать только латиницу, цифры, _ и -");
-      else if (data.detail === "password_too_short") alert("Пароль должен быть не короче 8 символов.");
-      else if (data.detail === "password_too_long") alert("Пароль не должен превышать 128 символов.");
-      else alert("Ошибка регистрации.");
+      if (data.detail === "invalid_email") showToast("Некорректный формат email.", "error");
+      else if (data.detail === "login_invalid_length") showToast("Логин должен быть от 3 до 64 символов.", "error");
+      else if (data.detail === "login_invalid_chars") showToast("Логин может содержать только латиницу, цифры, _ и -", "error");
+      else if (data.detail === "password_too_short") showToast("Пароль должен быть не короче 8 символов.", "error");
+      else if (data.detail === "password_too_long") showToast("Пароль не должен превышать 128 символов.", "error");
+      else showToast("Ошибка регистрации.", "error");
       return;
     }
     const regData = await resp.json();
@@ -554,7 +606,7 @@ async function uiRegister() {
         ? "Не удалось отправить письмо. Нажмите «Отправить повторно»."
         : "";
   } catch (e) {
-    alert("Ошибка сети. Попробуйте ещё раз.");
+    showToast("Ошибка сети. Попробуйте ещё раз.", "error");
   } finally {
     btn.disabled = false;
   }
@@ -587,7 +639,7 @@ async function uiVerifyEmail() {
     document.getElementById("login-form").style.display = "";
     document.getElementById("verify-code-input").value = "";
     _updateAuthModalCloseBtn(); // W3: показать крестик после verify
-    alert("Email подтверждён! Теперь войдите в аккаунт.");
+    showToast("Email подтверждён! Теперь войдите в аккаунт.", "success");
   } catch (e) {
     document.getElementById("verify-status").innerText = "Ошибка сети. Попробуйте ещё раз.";
   } finally {
@@ -693,7 +745,7 @@ async function uiResetPassword() {
     document.getElementById("forgot-reset-code-input").value = "";
     document.getElementById("forgot-reset-password-input").value = "";
     showLoginForm();
-    alert("Пароль успешно сброшен! Войдите с новым паролем.");
+    showToast("Пароль успешно сброшен! Войдите с новым паролем.", "success");
   } catch (e) {
     statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
   } finally {
@@ -861,7 +913,7 @@ async function uiChangePassword() {
       localStorage.setItem(LS_TOKEN, accessToken);
     }
     closeSettingsOverlay();
-    alert("Пароль изменён.");
+    showToast("Пароль изменён.", "success");
   } catch (e) {
     statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
   } finally {
@@ -940,7 +992,7 @@ async function uiChangeEmailConfirm() {
     if (_pendingNewEmail && currentUser) currentUser.email = _pendingNewEmail;
     _pendingNewEmail = null;
     closeSettingsOverlay();
-    alert("Email изменён.");
+    showToast("Email изменён.", "success");
   } catch (e) {
     statusEl.innerText = "Ошибка сети. Попробуйте ещё раз.";
   } finally {
@@ -1067,7 +1119,7 @@ async function confirmDeleteAccount() {
 
   // Если есть пароль — требуем его ввод
   if (hasPw && !password) {
-    alert("Введите пароль для подтверждения удаления.");
+    showToast("Введите пароль для подтверждения удаления.", "error");
     return;
   }
 
@@ -1080,17 +1132,17 @@ async function confirmDeleteAccount() {
     });
 
     if (resp.status === 403) {
-      alert("Неправильный пароль.");
+      showToast("Неправильный пароль.", "error");
       return;
     }
     if (!resp.ok) {
-      alert("Не удалось удалить аккаунт.");
+      showToast("Не удалось удалить аккаунт.", "error");
       return;
     }
 
     closeDeleteAccountModal();
     uiLogout();
-    alert("Аккаунт успешно удалён.");
+    showToast("Аккаунт успешно удалён.", "success");
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -1100,7 +1152,7 @@ let _linkingTelegram = false;
 async function startTelegramLink() {
   if (_linkingTelegram) return;
   if (!accessToken) {
-    alert("Сначала войдите.");
+    showToast("Сначала войдите.", "error");
     return;
   }
   _linkingTelegram = true;
@@ -1165,25 +1217,25 @@ async function startTelegramLink() {
 let _unlinkingTelegram = false;
 async function unlinkTelegram() {
   if (_unlinkingTelegram) return;
-  if (!confirm("Отвязать Telegram от аккаунта?")) return;
+  if (!await mmConfirm("Отвязать Telegram от аккаунта?", { confirmText: "Отвязать", isDanger: true })) return;
   _unlinkingTelegram = true;
   try {
     const resp = await apiFetch("/v1/me/telegram", { method: "DELETE" });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
       if (data.detail === "set_password_first") {
-        alert("Сначала установите пароль в настройках, иначе вы не сможете войти в аккаунт.");
+        showToast("Сначала установите пароль в настройках, иначе вы не сможете войти в аккаунт.", "error");
       } else if (data.detail === "telegram_not_linked") {
-        alert("Telegram уже отвязан.");
+        showToast("Telegram уже отвязан.", "error");
       } else {
-        alert(data.detail || "Ошибка отвязки.");
+        showToast(data.detail || "Ошибка отвязки.", "error");
       }
       return;
     }
     await loadMe();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   } finally {
     _unlinkingTelegram = false;
   }
@@ -1443,7 +1495,7 @@ function openLayersModal(title, html) {
 }
 
 function openCreateLayerModal() {
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
   const friends = (currentUser && Array.isArray(currentUser.friends)) ? currentUser.friends : [];
   const friendsHtml = friends.length === 0
     ? `<div class="hint">Добавлять редакторов можно только из друзей. Пока друзей нет.</div>`
@@ -1515,7 +1567,7 @@ async function submitCreateLayer() {
     renderGroupLayersUI();
     populateAddGroupSelect();
     closeLayersModal();
-    alert("Слой создан.");
+    showToast("Слой создан.", "success");
   } catch (e) {
     console.error(e);
     if (statusEl) { statusEl.style.color = "#b91c1c"; statusEl.innerText = "Ошибка сети."; }
@@ -1525,7 +1577,7 @@ async function submitCreateLayer() {
 }
 
 async function openEditLayerModal(groupId) {
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
 
   // determine my role from current snapshot
   const g = ((currentUser && currentUser.groups) || []).find(x => x.id === groupId);
@@ -1537,7 +1589,7 @@ async function openEditLayerModal(groupId) {
     const resp = await apiFetch(`/v1/groups/${groupId}`);
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось открыть слой: " + (data.detail || resp.status));
+      showToast("Не удалось открыть слой: " + (data.detail || resp.status), "error");
       return;
     }
 
@@ -1666,7 +1718,7 @@ async function openEditLayerModal(groupId) {
 
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   }
 }
 
@@ -1788,7 +1840,7 @@ async function cancelGroupInvite(inviteId, groupId) {
 }
 
 async function removeLayerMember(groupId, userId, displayName) {
-  const ok = confirm(`Удалить пользователя ${displayName} из слоя?`);
+  const ok = await mmConfirm(`Удалить пользователя ${displayName} из слоя?`, { confirmText: "Удалить", isDanger: true });
   if (!ok) return;
   const statusEl = document.getElementById("layer-edit-status");
   try {
@@ -1856,6 +1908,12 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (e.key === "Escape") {
+    // Приоритет 0.5: модалка подтверждения (mmConfirm)
+    const confirmModal = document.getElementById("mm-confirm-modal");
+    if (confirmModal && confirmModal.style.display !== "none") {
+      document.getElementById("mm-confirm-cancel").click();
+      return;
+    }
     // Приоритет 1: floating layers dropdown
     if (layersFloatingControl?.isOpen()) {
       layersFloatingControl.close();
@@ -1971,15 +2029,15 @@ document.addEventListener("click", (e) => {
 });
 
 async function confirmRemoveFriend(friendId, friendName) {
-  if (!accessToken) { alert("Сначала войдите."); return; }
-  const ok = confirm(`Точно хотите удалить из друзей ${friendName}?`);
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
+  const ok = await mmConfirm(`Точно хотите удалить из друзей ${friendName}?`, { confirmText: "Удалить", isDanger: true });
   if (!ok) return;
 
   try {
     const resp = await apiFetch(`/v1/friends/${friendId}`, { method: "DELETE" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось удалить из друзей: " + (data.detail || resp.status));
+      showToast("Не удалось удалить из друзей: " + (data.detail || resp.status), "error");
       return;
     }
     await refreshUserSnapshot();
@@ -1989,15 +2047,15 @@ async function confirmRemoveFriend(friendId, friendName) {
     updateNotifBadge();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети при удалении из друзей.");
+    showToast("Ошибка сети при удалении из друзей.", "error");
   }
 }
 
 // -------------------- BLOCK / UNBLOCK --------------------
 
 async function confirmBlockUser(userId, displayName) {
-  if (!accessToken) { alert("Сначала войдите."); return; }
-  const ok = confirm(`Заблокировать ${displayName}? Дружба будет удалена, пользователь не сможет найти вас и отправить запрос.`);
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
+  const ok = await mmConfirm(`Заблокировать ${displayName}? Дружба будет удалена, пользователь не сможет найти вас и отправить запрос.`, { confirmText: "Заблокировать", isDanger: true });
   if (!ok) return;
 
   try {
@@ -2008,7 +2066,7 @@ async function confirmBlockUser(userId, displayName) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось заблокировать: " + (data.detail || resp.status));
+      showToast("Не удалось заблокировать: " + (data.detail || resp.status), "error");
       return;
     }
     await refreshUserSnapshot();
@@ -2016,13 +2074,13 @@ async function confirmBlockUser(userId, displayName) {
     updateNotifBadge();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети при блокировке.");
+    showToast("Ошибка сети при блокировке.", "error");
   }
 }
 
 async function declineAndBlockUser(requestId, userId, displayName) {
-  if (!accessToken) { alert("Сначала войдите."); return; }
-  const ok = confirm(`Отклонить запрос и заблокировать ${displayName}?`);
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
+  const ok = await mmConfirm(`Отклонить запрос и заблокировать ${displayName}?`, { confirmText: "Заблокировать", isDanger: true });
   if (!ok) return;
 
   try {
@@ -2037,7 +2095,7 @@ async function declineAndBlockUser(requestId, userId, displayName) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Запрос отклонён, но не удалось заблокировать: " + (data.detail || resp.status));
+      showToast("Запрос отклонён, но не удалось заблокировать: " + (data.detail || resp.status), "error");
     }
     await refreshUserSnapshot();
     await loadFriendRequestsLists();
@@ -2045,25 +2103,25 @@ async function declineAndBlockUser(requestId, userId, displayName) {
     updateNotifBadge();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   }
 }
 
 async function unblockUser(userId) {
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
 
   try {
     const resp = await apiFetch(`/v1/blocks/${userId}`, { method: "DELETE" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось разблокировать: " + (data.detail || resp.status));
+      showToast("Не удалось разблокировать: " + (data.detail || resp.status), "error");
       return;
     }
     await refreshUserSnapshot();
     refreshBlockedListUI();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети при разблокировке.");
+    showToast("Ошибка сети при разблокировке.", "error");
   }
 }
 
@@ -2105,7 +2163,7 @@ function refreshBlockedListUI() {
 let _searchingUsers = false;
 async function uiSearchUsers() {
   if (_searchingUsers) return;
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
 
   const qEl = document.getElementById("friends-search-input");
   const statusEl = document.getElementById("friends-search-status");
@@ -2181,7 +2239,7 @@ async function uiSearchUsers() {
 }
 
 async function sendFriendRequest(toUserId) {
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
 
   // Optimistic UI: disable the button right away
   const btn = document.getElementById(`fr-add-btn-${toUserId}`);
@@ -2209,19 +2267,19 @@ async function sendFriendRequest(toUserId) {
         btn.classList.add("btn-primary");
         btn.innerText = "Добавить";
       }
-      alert("Не удалось отправить приглашение: " + (data.detail || resp.status));
+      showToast("Не удалось отправить приглашение: " + (data.detail || resp.status), "error");
       return;
     }
 
     // backend might auto-accept reverse request
     if (data.status === "accepted_by_reverse_request") {
       outgoingPendingIds.delete(toUserId);
-      alert("Запрос был принят автоматически (встречное приглашение). Теперь вы друзья.");
+      showToast("Запрос принят автоматически. Теперь вы друзья.", "success");
     } else if (data.status === "already_friends") {
       outgoingPendingIds.delete(toUserId);
-      alert("Вы уже друзья.");
+      showToast("Вы уже друзья.", "info");
     } else {
-      alert("Приглашение отправлено.");
+      showToast("Приглашение отправлено.", "success");
     }
 
     await refreshUserSnapshot();
@@ -2230,7 +2288,7 @@ async function sendFriendRequest(toUserId) {
   } catch (e) {
     console.error(e);
     outgoingPendingIds.delete(toUserId);
-    alert("Ошибка сети при отправке приглашения.");
+    showToast("Ошибка сети при отправке приглашения.", "error");
   }
 }
 
@@ -2256,7 +2314,7 @@ function closeModalOnOverlay(event) {
 }
 
 async function openFriendRequestsModal() {
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
 
   const overlay = document.getElementById("modal-overlay");
   if (!overlay) return;
@@ -2433,7 +2491,7 @@ async function acceptFriendRequest(requestId) {
     const resp = await apiFetch(`/v1/friends/requests/${requestId}/accept`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось принять: " + (data.detail || resp.status));
+      showToast("Не удалось принять: " + (data.detail || resp.status), "error");
       return;
     }
     await refreshUserSnapshot();
@@ -2441,7 +2499,7 @@ async function acceptFriendRequest(requestId) {
     refresh(); // чтобы новые точки от друзей (в будущем) могли появиться; сейчас просто безопасно
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   }
 }
 
@@ -2450,14 +2508,14 @@ async function declineFriendRequest(requestId) {
     const resp = await apiFetch(`/v1/friends/requests/${requestId}/decline`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось отклонить: " + (data.detail || resp.status));
+      showToast("Не удалось отклонить: " + (data.detail || resp.status), "error");
       return;
     }
     await refreshUserSnapshot();
     await loadFriendRequestsLists();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   }
 }
 
@@ -2470,7 +2528,7 @@ async function acceptGroupInvite(inviteId) {
     const resp = await apiFetch(`/v1/groups/invites/${inviteId}/accept`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось принять: " + (data.detail || resp.status));
+      showToast("Не удалось принять: " + (data.detail || resp.status), "error");
       return;
     }
     await refreshUserSnapshot();
@@ -2480,7 +2538,7 @@ async function acceptGroupInvite(inviteId) {
     refresh();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   } finally {
     _processingInvites.delete(inviteId);
   }
@@ -2493,14 +2551,14 @@ async function declineGroupInvite(inviteId) {
     const resp = await apiFetch(`/v1/groups/invites/${inviteId}/decline`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось отклонить: " + (data.detail || resp.status));
+      showToast("Не удалось отклонить: " + (data.detail || resp.status), "error");
       return;
     }
     await refreshUserSnapshot();
     await loadFriendRequestsLists();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   } finally {
     _processingInvites.delete(inviteId);
   }
@@ -3347,10 +3405,10 @@ function expandPopupNote(placeId) {
 async function confirmDeletePlace(placeId) {
   // Закрываем dropdown
   document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
-  if (!confirm("Удалить эту точку?")) return;
-  if (!accessToken) { alert("Нужно авторизоваться."); return; }
+  if (!await mmConfirm("Удалить эту точку?", { confirmText: "Удалить", isDanger: true })) return;
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
   const resp = await apiFetch(`/v1/places/${placeId}`, { method: "DELETE" });
-  if (!resp.ok) { alert("Ошибка удаления (код " + resp.status + ")"); return; }
+  if (!resp.ok) { showToast("Ошибка удаления (код " + resp.status + ")", "error"); return; }
   refresh();
   refreshLayerCardsPanel();
 }
@@ -3371,7 +3429,7 @@ function openEditPlace(placeId) {
   document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
 
   const place = _currentPlaces.find(p => p.id === placeId);
-  if (!place) { alert("Точка не найдена."); return; }
+  if (!place) { showToast("Точка не найдена.", "error"); return; }
 
   _editingPlaceId = placeId;
   _popupNeedsPersistence = false; // сбрасываем persistence при переходе к edit
@@ -3700,7 +3758,7 @@ document.getElementById("web-photos").addEventListener("change", async function(
   inp.value = ""; // сбрасываем input чтобы можно было выбрать ещё
   _renderPhotoPreview();
   if (heicSkipped > 0) {
-    alert("HEIC-фото не удалось обработать. Попробуйте конвертировать в JPEG перед загрузкой.");
+    showToast("HEIC-фото не удалось обработать. Попробуйте конвертировать в JPEG.", "error");
   }
 });
 
@@ -3751,14 +3809,14 @@ document.addEventListener("click", async (e) => {
     var mediaId = delMediaBtn.getAttribute("data-media-id");
     if (!mediaId) return;
 
-    if (!accessToken) { alert("Нужно войти."); return; }
-    if (!confirm("Удалить фото?")) return;
+    if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
+    if (!await mmConfirm("Удалить фото?", { confirmText: "Удалить", isDanger: true })) return;
 
     // Сохраняем ссылки на DOM ДО await (после удаления wrapper будет недоступен)
     var wrapper = delMediaBtn.closest("div[style*='position:relative']");
 
     var resp = await apiFetch("/v1/media/" + mediaId, { method: "DELETE" });
-    if (!resp.ok) { alert("Не удалось удалить фото (код " + resp.status + ")"); return; }
+    if (!resp.ok) { showToast("Не удалось удалить фото (код " + resp.status + ")", "error"); return; }
 
     // Sidebar edit path: обновляем _currentPlaces + перерисовываем edit panel
     if (_editingPlaceId) {
@@ -3787,14 +3845,14 @@ document.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!accessToken) { alert("Нужно войти."); return; }
+    if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
 
     var placeId = addPhotoBtn.getAttribute("data-id");
     var haveNow = Number(addPhotoBtn.getAttribute("data-have") || "0");
     var remaining = 12 - haveNow;
 
     if (!placeId) return;
-    if (remaining <= 0) { alert("Лимит фото достигнут."); return; }
+    if (remaining <= 0) { showToast("Лимит фото достигнут.", "error"); return; }
 
     _mmUploadPlaceId = placeId;
 
@@ -3816,7 +3874,7 @@ document.getElementById("mm-photo-input").addEventListener("change", async funct
   if (!placeId) return;
 
   if (files.length > remaining) {
-    alert("Можно добавить только " + remaining + " фото(шт).");
+    showToast("Можно добавить только " + remaining + " фото(шт).", "error");
     return;
   }
 
@@ -3865,7 +3923,7 @@ document.getElementById("mm-photo-input").addEventListener("change", async funct
     _updatePopupAfterUpload(placeId, newPhotos);
   } catch (err) {
     console.error(err);
-    alert("Ошибка при добавлении фото.");
+    showToast("Ошибка при добавлении фото.", "error");
   } finally {
     _mmUploadPlaceId = null;
   }
@@ -4058,13 +4116,21 @@ function showPlaceOnMap(placeId, lon, lat, groupId) {
   }, 5000);
 }
 
-/** Показать кратковременное уведомление внизу экрана */
-function showToast(msg) {
+/** Показать кратковременное уведомление внизу экрана
+ * @param {string} msg — текст
+ * @param {"info"|"error"|"success"} [type="info"] — тип (цвет)
+ * @param {number} [duration] — ms, по умолчанию 2500 (error = 4000)
+ */
+function showToast(msg, type, duration) {
+  const colors = { info: "#142E28", error: "#C44B3F", success: "#1B6B52" };
+  const bg = colors[type] || colors.info;
+  const ms = duration || (type === "error" ? 4000 : 2500);
   const el = document.createElement("div");
-  el.textContent = msg;
-  el.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 20px;border-radius:8px;z-index:10000;font-size:14px;pointer-events:none;";
+  el.textContent = msg.replace(/\.$/, "");
+  el.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:${bg};color:#FAF6F0;padding:10px 24px;border-radius:10px;z-index:20000;font-size:14px;pointer-events:none;max-width:calc(100vw - 32px);text-align:center;box-shadow:0 8px 24px rgba(20,46,40,0.25);opacity:1;transition:opacity 0.3s;`;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2500);
+  setTimeout(() => { el.style.opacity = "0"; }, ms - 300);
+  setTimeout(() => el.remove(), ms);
 }
 
 /** Копировать ссылку на точку в буфер обмена */
@@ -4126,7 +4192,7 @@ async function moderatePlace(placeId, status) {
       body: JSON.stringify({ status }),
     });
     if (!resp.ok) {
-      alert("Ошибка модерации (код " + resp.status + ").");
+      showToast("Ошибка модерации (код " + resp.status + ").", "error");
       return;
     }
     // обновляем очередь и карту
@@ -4134,7 +4200,7 @@ async function moderatePlace(placeId, status) {
     refresh();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети при модерации.");
+    showToast("Ошибка сети при модерации.", "error");
   } finally {
     _moderating = false;
   }
@@ -4544,7 +4610,7 @@ async function saveEditComment(commentId) {
   const ta = document.getElementById(`comment-edit-area-${commentId}`);
   if (!ta) return;
   const newText = (ta.value || "").trim();
-  if (!newText) { alert("Текст не может быть пустым."); return; }
+  if (!newText) { showToast("Текст не может быть пустым.", "error"); return; }
 
   _editSaving = true;
   try {
@@ -4559,14 +4625,14 @@ async function saveEditComment(commentId) {
       if (data.detail === "edit_time_expired") msg = "Время редактирования истекло (1 час).";
       else if (resp.status === 422) msg = "Текст слишком длинный (макс. 1000 символов).";
       else msg = "Ошибка: " + (data.detail || resp.status);
-      alert(msg);
+      showToast(msg, "error");
       if (data.detail === "edit_time_expired" && _commentsPlaceId) await loadComments(_commentsPlaceId);
       return;
     }
     if (_commentsPlaceId) await loadComments(_commentsPlaceId);
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   } finally {
     _editSaving = false;
   }
@@ -4623,7 +4689,7 @@ function cancelReply() {
 async function submitComment() {
   const placeId = _commentsPlaceId;
   if (!placeId) return;
-  if (!accessToken) { alert("Нужно войти."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
   if (_commentSubmitting) return;
 
   const input = document.getElementById("comment-input");
@@ -4699,7 +4765,7 @@ async function deleteComment(commentId) {
   document.querySelectorAll(".mm-popup-dropdown.open").forEach(el => el.classList.remove("open"));
 
   if (_commentDeleting) return;
-  if (!confirm("Удалить комментарий?")) return;
+  if (!await mmConfirm("Удалить комментарий?", { confirmText: "Удалить", isDanger: true })) return;
 
   _commentDeleting = true;
   const placeId = _commentsPlaceId;
@@ -4707,7 +4773,7 @@ async function deleteComment(commentId) {
     const resp = await apiFetch(`/v1/comments/${commentId}`, { method: "DELETE" });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      alert("Ошибка: " + (data.detail || resp.status));
+      showToast("Ошибка: " + (data.detail || resp.status), "error");
       return;
     }
     if (placeId && _commentsPlaceId === placeId) {
@@ -4716,7 +4782,7 @@ async function deleteComment(commentId) {
     }
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   } finally {
     _commentDeleting = false;
   }
@@ -4825,7 +4891,7 @@ async function markAllNotificationsRead() {
     await loadNotifications();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   }
 }
 
@@ -4838,7 +4904,7 @@ async function goToNotification(placeId, commentId, notifId, groupId, lat, lon) 
   closeFriendRequestsModal();
 
   if (!placeId) {
-    alert("Точка была удалена.");
+    showToast("Точка была удалена.", "info");
     return;
   }
 
@@ -4923,7 +4989,7 @@ function closeReportModalOnOverlay(e) {
 let _submittingReport = false;
 async function submitReport() {
   if (!_reportPlaceId) return;
-  if (!accessToken) { alert("Нужно войти."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
 
   const statusEl = document.getElementById("report-status");
   const selected = document.querySelector('input[name="report-category"]:checked');
@@ -5102,7 +5168,7 @@ async function changeUserRole(userId, newRole) {
     });
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      alert("Ошибка: " + (data.detail || resp.status));
+      showToast("Ошибка: " + (data.detail || resp.status), "error");
       loadAdminUsers(); // откатываем select к реальному значению
       return;
     }
@@ -5110,7 +5176,7 @@ async function changeUserRole(userId, newRole) {
     loadAdminUsers();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   }
 }
 
@@ -5173,18 +5239,18 @@ map.on("moveend", () => {
 let _leavingLayer = false;
 async function leaveLayer(groupId, placeCount) {
   if (_leavingLayer) return;
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
   const pc = Number(placeCount) || 0;
   const msg = pc > 0
     ? `В слое ${pc} ${pluralRu(pc, "точка", "точки", "точек")}. Они останутся в слое, но вы потеряете к ним доступ. Выйти?`
     : "Точно выйти из слоя?";
-  if (!confirm(msg)) return;
+  if (!await mmConfirm(msg, { confirmText: "Выйти", isDanger: true })) return;
   _leavingLayer = true;
   try {
     const resp = await apiFetch(`/v1/groups/${groupId}/leave`, { method: "POST" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось выйти: " + (data.detail || resp.status));
+      showToast("Не удалось выйти: " + (data.detail || resp.status), "error");
       return;
     }
     if (_layerCardsPanelGroupId === groupId) closeLayerCardsPanel();
@@ -5196,7 +5262,7 @@ async function leaveLayer(groupId, placeCount) {
     refresh();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   } finally {
     _leavingLayer = false;
   }
@@ -5205,20 +5271,20 @@ async function leaveLayer(groupId, placeCount) {
 let _deletingLayer = false;
 async function deleteLayer(groupId) {
   if (_deletingLayer) return;
-  if (!accessToken) { alert("Сначала войдите."); return; }
+  if (!accessToken) { showToast("Сначала войдите.", "error"); return; }
   let name = `слой ${groupId}`;
   try {
     const g = ((currentUser && currentUser.groups) || []).find(x => x.id === groupId);
     if (g && (g.name || g.title)) name = g.name || g.title;
   } catch (_) {}
 
-  if (!confirm(`Точно хотите удалить слой "${name}"? Все точки этого слоя будут удалены.`)) return;
+  if (!await mmConfirm(`Точно хотите удалить слой "${name}"? Все точки этого слоя будут удалены.`, { confirmText: "Удалить", isDanger: true })) return;
   _deletingLayer = true;
   try {
     const resp = await apiFetch(`/v1/groups/${groupId}`, { method: "DELETE" });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      alert("Не удалось удалить слой: " + (data.detail || resp.status));
+      showToast("Не удалось удалить слой: " + (data.detail || resp.status), "error");
       return;
     }
     if (_layerCardsPanelGroupId === groupId) closeLayerCardsPanel();
@@ -5230,7 +5296,7 @@ async function deleteLayer(groupId) {
     refresh();
   } catch (e) {
     console.error(e);
-    alert("Ошибка сети.");
+    showToast("Ошибка сети.", "error");
   } finally {
     _deletingLayer = false;
   }
