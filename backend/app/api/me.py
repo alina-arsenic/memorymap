@@ -384,7 +384,7 @@ def change_login(
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    new_login = (req.new_login or "").strip()
+    new_login = (req.new_login or "").strip().lower()
     if len(new_login) < 3 or len(new_login) > 64:
         raise HTTPException(status_code=400, detail="login_invalid_length")
     if not _LOGIN_RE.match(new_login):

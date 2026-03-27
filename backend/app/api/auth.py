@@ -47,8 +47,8 @@ class RegisterReq(BaseModel):
 
 @router.post("/auth/register")
 def register(req: RegisterReq, db: Session = Depends(get_db)):
-    # нормализуем логин
-    login = (req.login or "").strip()
+    # нормализуем логин (case-insensitive)
+    login = (req.login or "").strip().lower()
     if not login:
         raise HTTPException(status_code=400, detail="empty_login")
     if len(login) < 3 or len(login) > 64:
@@ -195,7 +195,7 @@ def login(req: LoginReq, db: Session = Depends(get_db)):
     if len(req.password or "") > 128:
         raise HTTPException(status_code=400, detail="password_too_long")
 
-    user = db.query(User).filter(User.login == req.login).one_or_none()
+    user = db.query(User).filter(User.login == req.login.strip().lower()).one_or_none()
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="bad_credentials")
 
@@ -235,7 +235,8 @@ def forgot_password(req: ForgotPasswordReq, db: Session = Depends(get_db)):
     email = _validate_email(req.email)
 
     # антиперечисление: всегда возвращаем одинаковый ответ
-    user = db.query(User).filter(User.email == email, User.email_verified.is_(True)).one_or_none()
+    # разрешаем сброс и для неверифицированных — ввод кода подтвердит email
+    user = db.query(User).filter(User.email == email).one_or_none()
     if not user:
         return {"status": "sent"}
 
@@ -292,9 +293,10 @@ def reset_password(req: ResetPasswordReq, db: Session = Depends(get_db)):
     if row.code != req.code.strip():
         raise HTTPException(status_code=400, detail="wrong_code")
 
-    # сброс пароля
+    # сброс пароля (ввод кода из письма подтверждает доступ к email)
     row.used_at = now
     user.password_hash = hash_password(req.new_password)
+    user.email_verified = True
     user.tokens_valid_after = now  # инвалидируем все старые JWT
     db.commit()
 
