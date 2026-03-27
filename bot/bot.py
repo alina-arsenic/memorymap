@@ -931,9 +931,9 @@ async def cb_delete_photo(c: types.CallbackQuery, state: FSMContext):
         url = item["url"]
         media_id = item["id"]
 
-        # Подменяем host на внутренний MinIO
+        # Подменяем scheme+host на внутренний MinIO (http, без TLS)
         parsed = urlparse(url)
-        internal_url = urlunparse(parsed._replace(netloc=MINIO_INTERNAL_HOST))
+        internal_url = urlunparse(parsed._replace(scheme="http", netloc=MINIO_INTERNAL_HOST))
 
         try:
             img_resp = requests.get(internal_url, timeout=30)
@@ -1289,9 +1289,9 @@ async def add_photo(m: types.Message, state: FSMContext):
     public_url = data_u["url"]
     temp_key = data_u["key"]
 
-    # внутренний URL для MinIO
+    # внутренний URL для MinIO (http, без TLS)
     parsed = urlparse(public_url)
-    internal_url = urlunparse(parsed._replace(netloc=MINIO_INTERNAL_HOST))
+    internal_url = urlunparse(parsed._replace(scheme="http", netloc=MINIO_INTERNAL_HOST))
 
     # качаем фото из Telegram
     try:
