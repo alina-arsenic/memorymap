@@ -58,6 +58,9 @@ def me(
     if current_user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    # гарантируем наличие личного слоя (ретроактивно для старых пользователей)
+    GroupService.ensure_personal_group(db, current_user)
+
     groups = GroupService.list_groups(db, current_user)
     friends = UserService.list_friends(db, current_user)
     inbox_count = FriendsService.inbox_count(db, current_user)

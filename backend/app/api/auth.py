@@ -10,6 +10,7 @@ from app.core.jwt import create_access_token
 from app.core.security import hash_password, verify_password
 from app.models.models import EmailVerificationCode, PasswordResetCode, User
 from app.services.email import send_password_reset_email, send_verification_email
+from app.services.groups import GroupService
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -88,6 +89,9 @@ def register(req: RegisterReq, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # создаём личный слой
+    GroupService.ensure_personal_group(db, user)
 
     # генерируем код и отправляем письмо
     code = _generate_code()

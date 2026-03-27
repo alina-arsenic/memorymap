@@ -1,38 +1,13 @@
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.core.deps import get_db
 from app.core.jwt import decode_access_token
-from app.models.models import Group, User
+from app.models.models import User
 from fastapi import Depends, Header
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-
-def _ensure_personal_group(db: Session, user: User) -> None:
-    name = f"Личная карта {user.tg_id or user.id}"
-
-    existing = (
-        db.query(Group)
-        .filter(Group.visibility == "private", Group.name == name)
-        .one_or_none()
-    )
-    if existing:
-        return
-
-    g = Group(name=name, visibility="private")
-    db.add(g)
-    db.commit()
-    db.refresh(g)
-
-    db.execute(
-        text(
-            "INSERT INTO membership (user_id, group_id, role) "
-            "VALUES (:uid, :gid, 'owner') "
-            "ON CONFLICT (user_id, group_id) DO UPDATE SET role='owner'"
-        ),
-        {"uid": user.id, "gid": g.id},
-    )
-    db.commit()
 
 def get_current_user(
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
@@ -57,6 +32,20 @@ def get_current_user(
     iat = payload.get("iat", 0)
     if user.tokens_valid_after and iat < int(user.tokens_valid_after.timestamp()):
         return None
+
+    # Обновляем last_active_at не чаще раза в 5 минут (raw SQL — колонка может отсутствовать)
+    try:
+        _now = datetime.now(timezone.utc)
+        db.execute(
+            text(
+                "UPDATE users SET last_active_at = :now WHERE id = :uid "
+                "AND (last_active_at IS NULL OR last_active_at < :thr)"
+            ),
+            {"now": _now, "uid": user.id, "thr": _now - timedelta(minutes=5)},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
 
     db.refresh(user)
     db.expunge(user)
