@@ -365,6 +365,15 @@ function mmConfirm(message, opts) {
   });
 }
 
+// Welcome-модалка: одноразовое предложение подключить Telegram-бота после первого входа
+function showWelcomeModal() {
+  const modal = document.getElementById("mm-welcome-modal");
+  if (!modal) return;
+  modal.style.display = "";
+  document.getElementById("mm-welcome-later").onclick = () => { modal.style.display = "none"; };
+  document.getElementById("mm-welcome-connect").onclick = () => { modal.style.display = "none"; openSettingsOverlay(); };
+}
+
 async function initAuthFromStorage() {
   const saved = localStorage.getItem(LS_TOKEN);
   // C7: если нет токена — сразу guest mode (без мерцания, класс уже на html)
@@ -541,6 +550,13 @@ async function uiLogin() {
     refresh();
     // Retry share-ссылки после логина (если была ?place= до авторизации)
     await tryOpenSharedPlace();
+    // Welcome-модалка: предлагаем подключить Telegram (одноразово, не при share-ссылке)
+    if (currentUser && !currentUser.tg_id
+        && !localStorage.getItem("mm_welcome_shown_" + currentUser.id)
+        && !new URLSearchParams(window.location.search).has("place")) {
+      localStorage.setItem("mm_welcome_shown_" + currentUser.id, "1");
+      showWelcomeModal();
+    }
   } catch (e) {
     showToast("Ошибка сети. Попробуйте ещё раз.", "error");
   } finally {
@@ -1912,6 +1928,12 @@ document.addEventListener("keydown", (e) => {
     const confirmModal = document.getElementById("mm-confirm-modal");
     if (confirmModal && confirmModal.style.display !== "none") {
       document.getElementById("mm-confirm-cancel").click();
+      return;
+    }
+    // Приоритет 0.7: welcome-модалка
+    const welcomeModal = document.getElementById("mm-welcome-modal");
+    if (welcomeModal && welcomeModal.style.display !== "none") {
+      welcomeModal.style.display = "none";
       return;
     }
     // Приоритет 1: floating layers dropdown

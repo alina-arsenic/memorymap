@@ -479,6 +479,20 @@
         </div>
       </div>
     </div>
+    <!-- MODAL: Welcome (первый вход — подключение Telegram) -->
+    <div id="mm-welcome-modal" class="mm-modal" style="display:none"
+      onclick="if(event.target===this){document.getElementById('mm-welcome-later').click();}">
+      <div class="mm-modal-card">
+        <div class="mm-modal-title">Добро пожаловать</div>
+        <div style="font-size:14px;line-height:1.6;color:#2D5A4A;">
+          Добавлять и редактировать точки удобнее через Telegram-бота — попробуйте подключить его в настройках
+        </div>
+        <div class="mm-modal-actions">
+          <button class="btn" id="mm-welcome-later">Позже</button>
+          <button class="btn btn-primary" id="mm-welcome-connect">Подключить</button>
+        </div>
+      </div>
+    </div>
     <input id="mm-photo-input" type="file" accept="image/*" multiple style="display: none" />
     <!-- MODAL: Friend requests -->
     <div
