@@ -33,7 +33,11 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 async def add_security_headers(request: Request, call_next):
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # Разрешаем iframe только для Яндекс.Метрики (Webvisor)
+    response.headers["Content-Security-Policy"] = (
+        "frame-ancestors 'self' https://webvisor.com https://*.webvisor.com"
+        " https://metrika.yandex.ru https://metrica.yandex.com"
+    )
 
     # Cache-Control для статических файлов
     path = request.url.path
