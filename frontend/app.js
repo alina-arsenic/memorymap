@@ -226,7 +226,7 @@ function switchTab(tabName) {
   if (sb && sb.classList.contains("collapsed")) {
     sb.classList.remove("collapsed");
     try { localStorage.setItem("mm_sidebar_collapsed", ""); } catch(e){}
-    if (typeof map !== "undefined" && map) setTimeout(function(){ map.resize(); }, 100);
+    if (typeof map !== "undefined" && map) setTimeout(function(){ map.resize(); }, 200);
   }
   // Закрыть панель карточек слоя при уходе с таба «Слои»
   if (tabName !== "layers") closeLayerCardsPanel();
@@ -255,7 +255,7 @@ function switchTab(tabName) {
   if (tabName === "moderation") loadModerationQueue();
 }
 
-// M6: сворачивание/разворачивание sidebar на мобильных
+// M6: сворачивание/разворачивание sidebar
 function toggleSidebar() {
   var sidebar = document.querySelector(".sidebar");
   if (!sidebar) return;
@@ -265,7 +265,7 @@ function toggleSidebar() {
   } catch (e) { /* private browsing */ }
   // Карта пересчитывает размер canvas
   if (typeof map !== "undefined" && map) {
-    setTimeout(function() { map.resize(); }, 100);
+    setTimeout(function() { map.resize(); }, 200);
   }
 }
 
@@ -284,12 +284,16 @@ function applyAuthUI(isAuthed) {
     document.documentElement.classList.remove("guest-mode");
     // Показать authed-only (sidebar контент)
     if (authedOnly) authedOnly.style.display = "";
-    // M6: восстановление collapsed-состояния sidebar
+    // M6: восстановление collapsed-состояния sidebar (desktop + mobile)
     try {
-      var isMobile = window.matchMedia("(max-width:800px),(orientation:landscape) and (max-height:500px) and (pointer:coarse)").matches;
-      if (isMobile && localStorage.getItem("mm_sidebar_collapsed") === "1") {
+      if (localStorage.getItem("mm_sidebar_collapsed") === "1") {
         var sidebarEl = document.querySelector(".sidebar");
-        if (sidebarEl) sidebarEl.classList.add("collapsed");
+        if (sidebarEl) {
+          sidebarEl.style.transition = "none";
+          sidebarEl.classList.add("collapsed");
+          void sidebarEl.offsetHeight; // force reflow без анимации
+          sidebarEl.style.transition = "";
+        }
       }
     } catch (e) {}
     // C19: закрыть auth-модалку после успешного логина

@@ -405,7 +405,7 @@ body {
 /* ===== Main layout ===== */
 .app {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: auto 1fr;
     /* C15: flex:1 вместо height:100vh — чтобы header + app = 100% */
     flex: 1;
     min-height: 0;
@@ -419,12 +419,56 @@ body {
     padding: 0;
     display: flex;
     flex-direction: column;
-    /* W5: sidebar не скроллится сам, скроллится tab-content */
-    overflow: hidden;
+    /* W5: скролл в tab-content; visible нужен для handle, выступающего за край */
+    overflow: visible;
+    /* Десктоп: фиксированная ширина + анимация сворачивания */
+    width: 280px;
+    position: relative;
+    transition: width 0.15s ease;
 }
 
-/* M6: ручка-пилюля для сворачивания sidebar (скрыта на desktop) */
-.sidebar-handle { display: none; }
+/* M6: кнопка сворачивания sidebar — десктоп: вертикальная стрелка на правом краю */
+.sidebar-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateX(100%) translateY(-50%);
+    width: 18px;
+    height: 44px;
+    background: #FAF6F0;
+    border: 1px solid #D6CFC5;
+    border-left: none;
+    border-radius: 0 10px 10px 0;
+    cursor: pointer;
+    z-index: 3;
+    padding: 0;
+    box-shadow: 2px 0 4px rgba(20,46,40,0.08);
+}
+.sidebar-handle svg {
+    stroke: #6B8F7F;
+    fill: none;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    /* Стрелка влево = «свернуть» */
+    transform: rotate(-90deg);
+    transition: transform 0.2s;
+}
+/* Sidebar свёрнут — ширина 0, контент скрыт */
+.sidebar.collapsed {
+    width: 0;
+    border-right: none;
+}
+.sidebar.collapsed #authed-only {
+    display: none;
+}
+.sidebar.collapsed .sidebar-handle svg {
+    /* Стрелка вправо = «развернуть» */
+    transform: rotate(90deg);
+}
 
 /* #authed-only внутри sidebar тоже flex-колонка */
 #authed-only{
@@ -432,6 +476,8 @@ body {
   flex-direction:column;
   flex:1;
   min-height:0;
+  /* Клиппинг контента при анимации ширины sidebar */
+  overflow:hidden;
 }
 
 .sidebar-section-title {
@@ -809,9 +855,9 @@ body {
         overflow: visible;
         position: relative;
         z-index: 2;
-    }
-    #authed-only {
-        overflow: hidden;
+        /* Сброс десктопных стилей */
+        width: auto;
+        transition: none;
     }
     .sidebar-tab {
         font-size: 12px;
@@ -826,33 +872,24 @@ body {
         max-height:calc(100vh - 48px);
         max-height:calc(100dvh - 48px);
     }
-    /* M6: ручка-пилюля для сворачивания sidebar */
+    /* M6: ручка-пилюля для сворачивания sidebar (мобильный вид) */
     .sidebar-handle {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: absolute;
-        bottom: 0;
+        /* Переопределение десктопных стилей на горизонтальную пилюлю внизу */
+        top: auto;
         right: 28%;
+        bottom: 0;
         transform: translateY(100%);
         width: 44px;
         height: 18px;
-        background: #FAF6F0;
         border: 1px solid #D6CFC5;
         border-top: none;
+        border-left: 1px solid #D6CFC5;
         border-radius: 0 0 10px 10px;
-        cursor: pointer;
-        z-index: 3;
-        padding: 0;
         box-shadow: 0 2px 4px rgba(20,46,40,0.08);
     }
     .sidebar-handle svg {
-        stroke: #6B8F7F;
-        fill: none;
-        stroke-width: 2.5;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        transition: transform 0.2s;
+        /* Сброс десктопного rotate(-90deg) — мобильный шеврон по умолчанию вверх */
+        transform: none;
     }
     /* M6: collapsed — sidebar свёрнут, видна только ручка */
     .sidebar.collapsed #authed-only {
@@ -861,6 +898,8 @@ body {
     .sidebar.collapsed {
         border-bottom: none;
         max-height: none;
+        /* Сброс десктопного width:0 — на мобильных sidebar full-width */
+        width: auto;
     }
     .sidebar.collapsed .sidebar-handle svg {
         transform: rotate(180deg);
@@ -1540,6 +1579,12 @@ body {
   display:flex;
   flex-direction:column;
   overflow:hidden;
+  /* Синхронно с анимацией sidebar */
+  transition:left 0.15s ease;
+}
+/* При свёрнутом sidebar панель прижимается к левому краю */
+.sidebar.collapsed ~ .layer-cards-panel{
+  left:0;
 }
 .layer-cards-header{
   display:flex;
