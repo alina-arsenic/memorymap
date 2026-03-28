@@ -58,7 +58,7 @@ class GroupService:
             rows = db.execute(
                 text(
                     """
-                    SELECT g.id, g.name, g.visibility, g.is_personal, NULL::text AS my_role
+                    SELECT g.id, g.name, g.visibility, g.is_personal, NULL AS my_role
                     FROM groups g
                     WHERE g.visibility='public'
                     ORDER BY g.id
